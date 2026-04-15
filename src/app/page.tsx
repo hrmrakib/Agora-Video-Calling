@@ -1,65 +1,237 @@
-import Image from "next/image";
+"use client";
+
+import { useState, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+  const router = useRouter();
+  const [channelName, setChannelName] = useState("");
+  const [error, setError] = useState("");
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+
+    const trimmed = channelName.trim();
+    if (!trimmed) {
+      setError("Please enter a channel name.");
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+      setError("Only letters, numbers, hyphens, and underscores are allowed.");
+      return;
+    }
+    router.push(`/channel/${encodeURIComponent(trimmed)}`);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className='join-page'>
+      <div className='join-card'>
+        <div className='logo-row'>
+          <span className='logo-dot' />
+          <span className='brand'>LiveRoom</span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+
+        <h1 className='headline'>
+          Start or join a<br />
+          <span className='headline-accent'>video call</span>
+        </h1>
+
+        <p className='subline'>
+          Enter a channel name to create a new room or join an existing one.
+        </p>
+
+        <form onSubmit={handleSubmit} className='join-form'>
+          <label htmlFor='channelName' className='field-label'>
+            Channel name
+          </label>
+          <div className='input-row'>
+            <input
+              id='channelName'
+              type='text'
+              placeholder='e.g. team-standup'
+              value={channelName}
+              onChange={(e) => {
+                setChannelName(e.target.value);
+                setError("");
+              }}
+              className='channel-input'
+              autoComplete='off'
+              spellCheck={false}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+          </div>
+
+          {error && <p className='error-msg'>{error}</p>}
+
+          <button type='submit' className='join-btn'>
+            Join room
+            <svg width='16' height='16' viewBox='0 0 16 16' fill='none'>
+              <path
+                d='M3 8h10M9 4l4 4-4 4'
+                stroke='currentColor'
+                strokeWidth='1.5'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              />
+            </svg>
+          </button>
+        </form>
+
+        <p className='hint'>
+          No account needed &mdash; just pick a name and share it with others.
+        </p>
+      </div>
+
+      <style>{`
+        .join-page {
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #0a0a0f;
+          font-family: 'DM Sans', 'Segoe UI', sans-serif;
+          padding: 2rem;
+        }
+
+        .join-card {
+          width: 100%;
+          max-width: 440px;
+          background: #111118;
+          border: 1px solid #1e1e2e;
+          border-radius: 20px;
+          padding: 2.5rem;
+        }
+
+        .logo-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 2.5rem;
+        }
+
+        .logo-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: #6366f1;
+          box-shadow: 0 0 8px #6366f1aa;
+          animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+
+        .brand {
+          font-size: 15px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          color: #e2e2f0;
+        }
+
+        .headline {
+          font-size: 2rem;
+          font-weight: 700;
+          line-height: 1.2;
+          color: #f0f0fa;
+          margin: 0 0 0.75rem;
+          letter-spacing: -0.02em;
+        }
+
+        .headline-accent {
+          color: #6366f1;
+        }
+
+        .subline {
+          font-size: 14px;
+          color: #6b6b85;
+          line-height: 1.6;
+          margin: 0 0 2rem;
+        }
+
+        .join-form {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+
+        .field-label {
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: #5a5a74;
+          margin-bottom: 4px;
+        }
+
+        .input-row {
+          position: relative;
+        }
+
+        .channel-input {
+          width: 100%;
+          background: #0d0d16;
+          border: 1px solid #1e1e2e;
+          border-radius: 12px;
+          padding: 0.85rem 1rem;
+          font-size: 15px;
+          color: #e2e2f0;
+          outline: none;
+          transition: border-color 0.2s;
+          box-sizing: border-box;
+          font-family: inherit;
+        }
+
+        .channel-input::placeholder {
+          color: #3a3a50;
+        }
+
+        .channel-input:focus {
+          border-color: #6366f1;
+          box-shadow: 0 0 0 3px #6366f120;
+        }
+
+        .error-msg {
+          font-size: 13px;
+          color: #f87171;
+          margin: 4px 0 0;
+        }
+
+        .join-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          margin-top: 8px;
+          background: #6366f1;
+          color: #fff;
+          border: none;
+          border-radius: 12px;
+          padding: 0.9rem 1.5rem;
+          font-size: 15px;
+          font-weight: 600;
+          cursor: pointer;
+          font-family: inherit;
+          transition: background 0.15s, transform 0.1s;
+        }
+
+        .join-btn:hover {
+          background: #5254cc;
+        }
+
+        .join-btn:active {
+          transform: scale(0.98);
+        }
+
+        .hint {
+          margin-top: 1.5rem;
+          font-size: 12px;
+          color: #3a3a50;
+          text-align: center;
+          line-height: 1.5;
+        }
+      `}</style>
+    </main>
   );
 }
