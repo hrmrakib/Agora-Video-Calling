@@ -50,6 +50,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   // ── Token state ────────────────────────────────────────────────────────────
   const [token, setToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState("");
+  const [uid, setUid] = useState<number | null>(null);
 
   useEffect(() => {
     async function fetchToken() {
@@ -61,7 +62,8 @@ function CallUI({ channelName, appId }: VideoCallProps) {
           const body = await res.json();
           throw new Error(body.error ?? "Failed to fetch token");
         }
-        const { token } = await res.json();
+        const { token, uid } = await res.json();
+        setUid(uid);
         setToken(token);
       } catch (err) {
         setTokenError(err instanceof Error ? err.message : "Unknown error");
@@ -73,18 +75,47 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   // ── Agora hooks ────────────────────────────────────────────────────────────
   const { isLoading: isLoadingMic, localMicrophoneTrack } =
     useLocalMicrophoneTrack(true);
+
   const { isLoading: isLoadingCam, localCameraTrack } =
     useLocalCameraTrack(true);
+
+  // Cam/Mic START manually AFTER join
+  useEffect(() => {
+    if (token && uid && localCameraTrack && localMicrophoneTrack) {
+      localCameraTrack.setEnabled(true).catch(console.error);
+      localMicrophoneTrack.setEnabled(true).catch(console.error);
+    }
+  }, [token, uid, localCameraTrack, localMicrophoneTrack]);
+
+  // Handle Camera Errors
+  useEffect(() => {
+    if (localCameraTrack) return;
+
+    navigator.mediaDevices.getUserMedia({ video: true }).catch((err) => {
+      console.error("Camera access failed:", err);
+
+      if (err.name === "NotReadableError") {
+        alert("Camera is already in use.");
+      } else if (err.name === "NotAllowedError") {
+        alert("Camera permission denied.");
+      }
+    });
+  }, [localCameraTrack]);
 
   const remoteUsers = useRemoteUsers();
   const { audioTracks } = useRemoteAudioTracks(remoteUsers);
 
-  usePublish([localMicrophoneTrack, localCameraTrack]);
+  // usePublish([localMicrophoneTrack, localCameraTrack]);
+  usePublish(
+    localMicrophoneTrack && localCameraTrack
+      ? [localMicrophoneTrack, localCameraTrack]
+      : [],
+  );
 
   // Only join once the token is ready
   useJoin(
-    { appid: appId, channel: channelName, token: token! },
-    !!token, // <— "ready" flag: Agora won't try to join until this is true
+    { appid: appId, channel: channelName, token: token!, uid: uid! },
+    !!token && !!uid, // <— "ready" flag: Agora won't try to join until this is true
   );
 
   useEffect(() => {
@@ -101,10 +132,16 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     setCamMuted((prev) => !prev);
   }
 
-  function endCall() {
-    localMicrophoneTrack?.close();
-    localCameraTrack?.close();
-    router.push("/");
+  async function endCall() {
+    try {
+      localMicrophoneTrack?.close();
+      localCameraTrack?.close();
+      await client.leave();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      router.push("/");
+    }
   }
 
   const isLoading = !token || isLoadingMic || isLoadingCam;
@@ -175,7 +212,14 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
             {remoteUsers.map((user) => (
               <div key={user.uid} className='video-tile'>
-                <RemoteUser user={user} className='video-track' />
+                {/* <RemoteUser user={user} className='video-track' /> */}
+                {user.videoTrack ? (
+                  <RemoteUser user={user} className='video-track' />
+                ) : (
+                  <div className='cam-off-overlay'>
+                    <span className='avatar-initial'>User</span>
+                  </div>
+                )}
                 <span className='tile-label'>User {user.uid}</span>
               </div>
             ))}
@@ -232,6 +276,7 @@ const MicIcon = () => (
     <line x1='8' y1='22' x2='16' y2='22' />
   </svg>
 );
+
 const MicOffIcon = () => (
   <svg
     width='20'
@@ -252,6 +297,7 @@ const MicOffIcon = () => (
     <line x1='8' y1='22' x2='16' y2='22' />
   </svg>
 );
+
 const CamIcon = () => (
   <svg
     width='20'
@@ -267,6 +313,7 @@ const CamIcon = () => (
     <rect x='1' y='5' width='15' height='14' rx='2' ry='2' />
   </svg>
 );
+
 const CamOffIcon = () => (
   <svg
     width='20'
@@ -282,6 +329,7 @@ const CamOffIcon = () => (
     <line x1='2' y1='2' x2='22' y2='22' />
   </svg>
 );
+
 const PhoneOffIcon = () => (
   <svg
     width='20'

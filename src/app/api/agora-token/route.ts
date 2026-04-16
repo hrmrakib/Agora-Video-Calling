@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   }
 
   // uid 0 = Agora assigns one automatically
-  const uid = 0;
+  const uid = Math.floor(Math.random() * 100000);
   const role = RtcRole.PUBLISHER;
   const tokenExpirySeconds = 3600; // 1 hour
   const privilegeExpireTime =
@@ -42,5 +42,5 @@ export async function GET(request: NextRequest) {
     privilegeExpireTime,
   );
 
-  return NextResponse.json({ token });
+  return NextResponse.json({ token, uid });
 }
