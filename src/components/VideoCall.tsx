@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState } from "react";
@@ -13,6 +14,7 @@ import AgoraRTC, {
   useRemoteAudioTracks,
   useRemoteUsers,
 } from "agora-rtc-react";
+import { User } from "lucide-react";
 
 const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 
@@ -46,12 +48,33 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const router = useRouter();
   const [micMuted, setMicMuted] = useState(false);
   const [camMuted, setCamMuted] = useState(false);
+  //
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [screenTrack, setScreenTrack] = useState<any>(null);
+  const [activeSpeaker, setActiveSpeaker] = useState<number | null>(null);
 
   // ── Token state ────────────────────────────────────────────────────────────
   const [token, setToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState("");
   const [uid, setUid] = useState<number | null>(null);
 
+  // Active Speaker Detection
+  useEffect(() => {
+    client.enableAudioVolumeIndicator();
+
+    const handler = (volumes: any[]) => {
+      const active = volumes.find((v) => v.level > 50);
+      if (active) setActiveSpeaker(Number(active.uid));
+    };
+
+    client.on("volume-indicator", handler);
+
+    return () => {
+      client.off("volume-indicator", handler);
+    };
+  }, []);
+
+  // get token
   useEffect(() => {
     async function fetchToken() {
       try {
@@ -106,10 +129,21 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const { audioTracks } = useRemoteAudioTracks(remoteUsers);
 
   // usePublish([localMicrophoneTrack, localCameraTrack]);
+  // usePublish(
+  //   localMicrophoneTrack
+  //     ? screenTrack
+  //       ? [localMicrophoneTrack, screenTrack]
+  //       : localCameraTrack
+  //         ? [localMicrophoneTrack, localCameraTrack]
+  //         : [localMicrophoneTrack]
+  //     : [],
+  // );
   usePublish(
-    localMicrophoneTrack && localCameraTrack
-      ? [localMicrophoneTrack, localCameraTrack]
-      : [],
+    screenTrack
+      ? [localMicrophoneTrack!, screenTrack] // screen ON
+      : localCameraTrack
+        ? [localMicrophoneTrack!, localCameraTrack] // normal camera
+        : [],
   );
 
   // Only join once the token is ready
@@ -141,6 +175,58 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       console.error(err);
     } finally {
       router.push("/");
+    }
+  }
+
+  // Screen Sharing
+  async function startScreenShare() {
+    try {
+      if (!client) return;
+
+      // Create screen track
+      const screenTrack = await AgoraRTC.createScreenVideoTrack(
+        { encoderConfig: "1080p_1" },
+        "auto",
+      );
+
+      // When user clicks "Stop sharing" from browser
+      screenTrack.on("track-ended", async () => {
+        await stopScreenShare();
+      });
+
+      // Unpublish camera FIRST (important)
+      if (localCameraTrack) {
+        await client.unpublish(localCameraTrack);
+      }
+
+      // Publish screen
+      await client.publish(screenTrack);
+
+      setScreenTrack(screenTrack);
+    } catch (err) {
+      console.error("Screen share error:", err);
+    }
+  }
+
+  async function stopScreenShare() {
+    try {
+      if (!screenTrack) return;
+
+      // Unpublish screen
+      await client.unpublish(screenTrack);
+
+      // Stop & close track
+      screenTrack.stop();
+      screenTrack.close();
+
+      setScreenTrack(null);
+
+      // Re-publish camera
+      if (localCameraTrack) {
+        await client.publish(localCameraTrack);
+      }
+    } catch (err) {
+      console.error("Stop screen share error:", err);
     }
   }
 
@@ -212,7 +298,6 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
             {remoteUsers.map((user) => (
               <div key={user.uid} className='video-tile'>
-                {/* <RemoteUser user={user} className='video-track' /> */}
                 {user.videoTrack ? (
                   <RemoteUser user={user} className='video-track' />
                 ) : (
@@ -226,6 +311,21 @@ function CallUI({ channelName, appId }: VideoCallProps) {
           </>
         )}
       </div>
+
+      {showSidebar && (
+        <div className='sidebar'>
+          <h3>Participants</h3>
+          <ul>
+            <li>You ({uid})</li>
+            {remoteUsers.map((u, inx: number) => (
+              <li key={u.uid} className='flex items-center gap-1'>
+                {inx + 1}: <User size={16} />
+                User {u.uid}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Controls bar */}
       <div className='controls-bar'>
@@ -245,6 +345,22 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         >
           {camMuted ? <CamOffIcon /> : <CamIcon />}
           <span>{camMuted ? "Start cam" : "Stop cam"}</span>
+        </button>
+
+        <button
+          onClick={screenTrack ? stopScreenShare : startScreenShare}
+          className={`ctrl-btn ${camMuted ? "ctrl-btn--off" : ""}`}
+        >
+          {screenTrack ? <ScreenShareOnIcon /> : <ScreenShareOffIcon />}
+          <span>{screenTrack ? "Stop" : "Share"}</span>
+        </button>
+
+        <button
+          onClick={() => setShowSidebar((p) => !p)}
+          className={`ctrl-btn ${camMuted ? "ctrl-btn--off" : ""}`}
+        >
+          {showSidebar ? <HideUserIcon /> : <ShowUserIcon />}
+          <span>{showSidebar ? "Hide" : "See"}</span>
         </button>
 
         <button className='ctrl-btn ctrl-btn--end' onClick={endCall}>
@@ -348,6 +464,83 @@ const PhoneOffIcon = () => (
   </svg>
 );
 
+const ScreenShareOnIcon = () => (
+  <svg
+    width='20'
+    height='20'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='1.8'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <rect x='2' y='3' width='20' height='14' rx='2' />
+    <line x1='12' y1='17' x2='12' y2='21' />
+    <line x1='8' y1='21' x2='16' y2='21' />
+    <polyline points='8 10 12 6 16 10' />
+    <line x1='12' y1='6' x2='12' y2='14' />
+  </svg>
+);
+
+const ScreenShareOffIcon = () => (
+  <svg
+    width='20'
+    height='20'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='1.8'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <line x1='2' y1='2' x2='22' y2='22' />
+    <path d='M7.2 3H22a2 2 0 0 1 2 2v10a2 2 0 0 1-1.18 1.82' />
+    <path d='M2 8.5V5a2 2 0 0 1 .5-1.31' />
+    <path d='M2 13V5' />
+    <rect x='2' y='3' width='20' height='14' rx='2' />
+    <line x1='12' y1='17' x2='12' y2='21' />
+    <line x1='8' y1='21' x2='16' y2='21' />
+  </svg>
+);
+
+const ShowUserIcon = () => (
+  <svg
+    width='20'
+    height='20'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='1.8'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <circle cx='9' cy='7' r='3' />
+    <path d='M3 21v-2a5 5 0 0 1 10 0v2' />
+    <path d='M16 3.13a4 4 0 0 1 0 7.75' />
+    <path d='M21 21v-2a5 5 0 0 0-3-4.65' />
+  </svg>
+);
+
+const HideUserIcon = () => (
+  <svg
+    width='20'
+    height='20'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='1.8'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <line x1='2' y1='2' x2='22' y2='22' />
+    <circle cx='9' cy='7' r='3' />
+    <path d='M3 21v-2a5 5 0 0 1 6.26-4.82' />
+    <path d='M16 3.13a4 4 0 0 1 0 7.75' />
+    <path d='M21 21v-2a5 5 0 0 0-3-4.65' />
+  </svg>
+);
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const callStyles = `
   .call-root {
@@ -436,6 +629,37 @@ const callStyles = `
   .ctrl-btn--off:hover { background: #2a1420; color: #fca5a5; }
   .ctrl-btn--end { background: #3a0f0f; border-color: #5a1a1a; color: #f87171; }
   .ctrl-btn--end:hover { background: #4a1414; color: #fca5a5; }
+
+  .active-speaker {
+  border: 2px solid #22c55e;
+  box-shadow: 0 0 12px #22c55e88;
+}
+
+  .sidebar {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 240px;
+    height: 100%;
+    background: #0d0d16;
+    border-left: 1px solid #1a1a28;
+    padding: 1rem;
+  }
+
+  .sidebar h3 {
+    font-size: 14px;
+    margin-bottom: 10px;
+  }
+
+  .sidebar ul {
+    list-style: none;
+    padding: 0;
+    font-size: 13px;
+  }
+
+  .end-call {
+    background: red;
+  }
 `;
 
 const errorStyles = `
