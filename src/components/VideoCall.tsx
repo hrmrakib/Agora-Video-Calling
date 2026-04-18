@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AgoraRTC, {
   AgoraRTCProvider,
+  ILocalVideoTrack,
   LocalVideoTrack,
   RemoteUser,
   useJoin,
@@ -128,16 +129,6 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const remoteUsers = useRemoteUsers();
   const { audioTracks } = useRemoteAudioTracks(remoteUsers);
 
-  // usePublish([localMicrophoneTrack, localCameraTrack]);
-  // usePublish(
-  //   localMicrophoneTrack
-  //     ? screenTrack
-  //       ? [localMicrophoneTrack, screenTrack]
-  //       : localCameraTrack
-  //         ? [localMicrophoneTrack, localCameraTrack]
-  //         : [localMicrophoneTrack]
-  //     : [],
-  // );
   usePublish(
     screenTrack
       ? [localMicrophoneTrack!, screenTrack] // screen ON
@@ -181,13 +172,27 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   // Screen Sharing
   async function startScreenShare() {
     try {
+      const track = (await AgoraRTC.createScreenVideoTrack(
+        { encoderConfig: "1080p_1" },
+        "disable",
+      )) as ILocalVideoTrack;
+
+      track.on("track-ended", stopScreenShare);
+
+      setScreenTrack(track); // ✅ ONLY STATE
+    } catch (err) {
+      console.error("Screen share error:", err);
+    }
+  }
+  async function startScreenShareOld() {
+    try {
       if (!client) return;
 
       // Create screen track
-      const screenTrack = await AgoraRTC.createScreenVideoTrack(
+      const screenTrack = (await AgoraRTC.createScreenVideoTrack(
         { encoderConfig: "1080p_1" },
         "auto",
-      );
+      )) as ILocalVideoTrack;
 
       // When user clicks "Stop sharing" from browser
       screenTrack.on("track-ended", async () => {
