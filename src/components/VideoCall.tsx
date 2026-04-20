@@ -122,9 +122,9 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   useEffect(() => {
     if (localCameraTrack) return;
     navigator.mediaDevices.getUserMedia({ video: true }).catch((err) => {
-      if (err.name === "NotReadableError") alert("Camera is already in use.");
-      else if (err.name === "NotAllowedError")
-        alert("Camera permission denied.");
+      // if (err.name === "NotReadableError") alert("Camera is already in use.");
+      // else if (err.name === "NotAllowedError")
+      //   alert("Camera permission denied.");
     });
   }, [localCameraTrack]);
 
@@ -132,9 +132,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const { audioTracks } = useRemoteAudioTracks(remoteUsers);
 
   // FIX 2: usePublish — single publishing model, consistent array shape
-  // When screen sharing: publish mic + screen video (+ screen audio if present)
-  // When not: publish mic + camera (if available)
-  // Camera is NEVER published while screen track is active
+
   usePublish(
     screenTrack
       ? screenTrack.audioTrack
@@ -291,7 +289,8 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       const res = await fetch("/api/agora-recording/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelName, uid }),
+        // body: JSON.stringify({ channelName, uid }),
+        body: JSON.stringify({ channelName }),
       });
 
       if (!res.ok) {
@@ -323,7 +322,8 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       const res = await fetch("/api/agora-recording/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelName, uid, resourceId, sid }),
+        // body: JSON.stringify({ channelName, uid, resourceId, sid }),
+        body: JSON.stringify({ channelName, resourceId, sid }),
       });
 
       if (!res.ok) {
