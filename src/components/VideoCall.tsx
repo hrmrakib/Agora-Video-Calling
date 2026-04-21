@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AgoraRTC, {
   AgoraRTCProvider,
@@ -24,11 +24,10 @@ interface VideoCallProps {
   appId: string;
 }
 
-// FIX 1: Typed screenTrack shape — stores the listener ref so we can remove it later
 interface ScreenTrackState {
   videoTrack: ILocalVideoTrack;
   audioTrack?: any;
-  _onEnded: () => void; // store so we can detach it on stop
+  _onEnded: () => void;
 }
 
 export default function VideoCall({ channelName, appId }: VideoCallProps) {
@@ -59,7 +58,6 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const [camMuted, setCamMuted] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
 
-  // FIX 1: Typed, consistent shape — null or ScreenTrackState
   const [screenTrack, setScreenTrack] = useState<ScreenTrackState | null>(null);
   const [activeSpeaker, setActiveSpeaker] = useState<number | null>(null);
 
@@ -67,11 +65,13 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const [tokenError, setTokenError] = useState("");
   const [uid, setUid] = useState<number | null>(null);
 
-  // FIX 4: recording error state added
   const [recording, setRecording] = useState(false);
   const [recordingError, setRecordingError] = useState("");
   const [resourceId, setResourceId] = useState("");
   const [sid, setSid] = useState("");
+
+  // ✅ FIX: Real useRef — survives re-renders, no stale closure
+  const stopScreenShareRef = useRef<() => void>(() => {});
 
   // Active Speaker Detection
   useEffect(() => {
@@ -121,31 +121,36 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
   useEffect(() => {
     if (localCameraTrack) return;
-    navigator.mediaDevices.getUserMedia({ video: true }).catch((err) => {
-      // if (err.name === "NotReadableError") alert("Camera is already in use.");
-      // else if (err.name === "NotAllowedError")
-      //   alert("Camera permission denied.");
-    });
+    navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {});
   }, [localCameraTrack]);
 
   const remoteUsers = useRemoteUsers();
   const { audioTracks } = useRemoteAudioTracks(remoteUsers);
 
-  // FIX 2: usePublish — single publishing model, consistent array shape
+  const publishTracks = [];
+  if (localMicrophoneTrack) publishTracks.push(localMicrophoneTrack);
+  if (screenTrack) {
+    publishTracks.push(screenTrack.videoTrack);
+    if (screenTrack.audioTrack) publishTracks.push(screenTrack.audioTrack);
+  } else if (localCameraTrack) {
+    publishTracks.push(localCameraTrack);
+  }
 
-  usePublish(
-    screenTrack
-      ? screenTrack.audioTrack
-        ? [
-            localMicrophoneTrack!,
-            screenTrack.videoTrack,
-            screenTrack.audioTrack,
-          ]
-        : [localMicrophoneTrack!, screenTrack.videoTrack]
-      : localCameraTrack
-        ? [localMicrophoneTrack!, localCameraTrack]
-        : [],
-  );
+  usePublish(publishTracks);
+
+  // usePublish(
+  //   screenTrack
+  //     ? screenTrack.audioTrack
+  //       ? [
+  //           localMicrophoneTrack!,
+  //           screenTrack.videoTrack,
+  //           screenTrack.audioTrack,
+  //         ]
+  //       : [localMicrophoneTrack!, screenTrack.videoTrack]
+  //     : localCameraTrack
+  //       ? [localMicrophoneTrack!, localCameraTrack]
+  //       : [],
+  // );
 
   useJoin(
     { appid: appId, channel: channelName, token: token!, uid: uid! },
@@ -168,7 +173,6 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
   async function endCall() {
     try {
-      // FIX 3: Also clean up any active screen share on end call
       if (screenTrack) {
         const { videoTrack, audioTrack, _onEnded } = screenTrack;
         try {
@@ -200,8 +204,69 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
   }
 
-  // FIX 3: Store _onEnded ref so we can reliably remove the listener on stop
-  async function startScreenShare() {
+  // ─── STOP (defined before start so start can reference the ref) ──────────
+  async function stopScreenShare1() {
+    try {
+      // Read screenTrack from the ref-based snapshot to avoid stale closure
+      setScreenTrack((current) => {
+        if (!current) return null;
+
+        const { videoTrack, audioTrack, _onEnded } = current;
+
+        // Remove the track-ended listener first — prevents double-fire
+        try {
+          videoTrack.off("track-ended", _onEnded);
+        } catch {}
+
+        // Free the OS-level capture device
+        try {
+          videoTrack.stop();
+        } catch {}
+        try {
+          videoTrack.close();
+        } catch {}
+        if (audioTrack) {
+          try {
+            audioTrack.stop();
+          } catch {}
+          try {
+            audioTrack.close();
+          } catch {}
+        }
+
+        // Returning null clears state → usePublish switches back to camera
+        return null;
+      });
+    } catch (err) {
+      console.error("Stop screen share error:", err);
+    }
+  }
+
+  async function stopScreenShare() {
+    if (!screenTrack) return;
+
+    const { videoTrack, audioTrack } = screenTrack;
+
+    videoTrack.stop();
+    videoTrack.close();
+
+    if (audioTrack) {
+      audioTrack.stop();
+      audioTrack.close();
+    }
+
+    setScreenTrack(null);
+
+    // ✅ restore camera properly
+    // await client.publish(localCameraTrack!);
+  }
+
+  // ✅ FIX: Keep the ref pointing at the latest stopScreenShare on every render
+  // This is the line that was missing before — the plain object never did this.
+  stopScreenShareRef.current = stopScreenShare;
+
+  // ─── START ───────────────────────────────────────────────────────────────
+  async function startScreenShare1() {
     try {
       const t = await AgoraRTC.createScreenVideoTrack(
         { encoderConfig: "1080p_1" },
@@ -217,13 +282,15 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         videoTrack = t as ILocalVideoTrack;
       }
 
-      // Guard: createScreenVideoTrack should always return a video track
       if (!videoTrack) {
         console.error("Screen share: no video track returned");
         return;
       }
 
-      // FIX 3: Named listener stored in state so stopScreenShare can remove it
+      // ✅ FIX: The closure captures stopScreenShareRef (a stable object).
+      // stopScreenShareRef.current is updated every render above, so when
+      // track-ended fires later it always calls the LATEST stopScreenShare
+      // which has fresh state — never the stale null version.
       const onEnded = () => stopScreenShareRef.current();
       videoTrack.on("track-ended", onEnded);
 
@@ -240,71 +307,56 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
   }
 
-  async function stopScreenShare() {
+  async function startScreenShare() {
     try {
-      if (!screenTrack) return;
+      // ❗ IMPORTANT: remove camera from stream
+      // await client.unpublish(localCameraTrack!);
 
-      const { videoTrack, audioTrack, _onEnded } = screenTrack;
+      const t = await AgoraRTC.createScreenVideoTrack(
+        { encoderConfig: "1080p_1" },
+        "enable",
+      );
 
-      // FIX 3: Remove the track-ended listener before closing to prevent double-fire
-      if (videoTrack && _onEnded) {
-        try {
-          videoTrack.off("track-ended", _onEnded);
-        } catch {}
+      let videoTrack: ILocalVideoTrack | null = null;
+      let audioTrack: any = null;
+
+      if (Array.isArray(t)) {
+        [videoTrack, audioTrack] = t;
+      } else {
+        videoTrack = t as ILocalVideoTrack;
       }
 
-      // FIX 3: Always stop() then close() to free the device
-      if (videoTrack) {
-        try {
-          videoTrack.stop();
-        } catch {}
-        try {
-          videoTrack.close();
-        } catch {}
-      }
-      if (audioTrack) {
-        try {
-          audioTrack.stop();
-        } catch {}
-        try {
-          audioTrack.close();
-        } catch {}
-      }
+      if (!videoTrack) return;
 
-      // Clearing state triggers usePublish to re-publish camera automatically
-      setScreenTrack(null);
+      const onEnded = () => stopScreenShareRef.current();
+      videoTrack.on("track-ended", onEnded);
+
+      setScreenTrack({
+        videoTrack,
+        audioTrack: audioTrack ?? undefined,
+        _onEnded: onEnded,
+      });
     } catch (err) {
-      console.error("Stop screen share error:", err);
+      console.error(err);
     }
   }
 
-  // FIX 3: Use a ref so the track-ended closure always calls the latest version
-  // (avoids stale-closure issues with async state in the event handler)
-  const stopScreenShareRef = { current: stopScreenShare };
-
-  // FIX 4: Validate API response — require resourceId and sid before marking as recording
+  // ─── Recording ───────────────────────────────────────────────────────────
   async function startRecording() {
     setRecordingError("");
     try {
       const res = await fetch("/api/agora-recording/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // body: JSON.stringify({ channelName, uid }),
         body: JSON.stringify({ channelName }),
       });
-
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(`Recording start API returned ${res.status}`);
-      }
-
       const data = await res.json();
-
-      if (!data.resourceId || !data.sid) {
+      if (!data.resourceId || !data.sid)
         throw new Error(
           "Invalid recording response: missing resourceId or sid",
         );
-      }
-
       setResourceId(data.resourceId);
       setSid(data.sid);
       setRecording(true);
@@ -315,21 +367,15 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
   }
 
-  // FIX 4: Validate stop response and clear state only on success
   async function stopRecording() {
     setRecordingError("");
     try {
       const res = await fetch("/api/agora-recording/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // body: JSON.stringify({ channelName, uid, resourceId, sid }),
         body: JSON.stringify({ channelName, resourceId, sid }),
       });
-
-      if (!res.ok) {
-        throw new Error(`Recording stop API returned ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`Recording stop API returned ${res.status}`);
       setRecording(false);
       setResourceId("");
       setSid("");
@@ -399,19 +445,31 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         ) : (
           <>
             <div className='video-tile'>
-              <LocalVideoTrack
+              {screenTrack ? (
+                <LocalVideoTrack
+                  track={screenTrack.videoTrack}
+                  play
+                  className='video-track'
+                />
+              ) : (
+                <LocalVideoTrack
+                  track={localCameraTrack}
+                  play={!camMuted}
+                  className='video-track'
+                />
+              )}
+              {/* <LocalVideoTrack
                 track={localCameraTrack}
                 play={!camMuted && !screenTrack}
                 className='video-track'
               />
-              {/* Show screen share preview for local user */}
               {screenTrack && (
                 <LocalVideoTrack
                   track={screenTrack.videoTrack}
                   play={true}
                   className='video-track'
                 />
-              )}
+              )} */}
               {camMuted && !screenTrack && (
                 <div className='cam-off-overlay'>
                   <span className='avatar-initial'>You</span>
