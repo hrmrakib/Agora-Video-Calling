@@ -138,20 +138,6 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
   usePublish(publishTracks);
 
-  // usePublish(
-  //   screenTrack
-  //     ? screenTrack.audioTrack
-  //       ? [
-  //           localMicrophoneTrack!,
-  //           screenTrack.videoTrack,
-  //           screenTrack.audioTrack,
-  //         ]
-  //       : [localMicrophoneTrack!, screenTrack.videoTrack]
-  //     : localCameraTrack
-  //       ? [localMicrophoneTrack!, localCameraTrack]
-  //       : [],
-  // );
-
   useJoin(
     { appid: appId, channel: channelName, token: token!, uid: uid! },
     !!token && !!uid,
@@ -205,43 +191,6 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   }
 
   // ─── STOP (defined before start so start can reference the ref) ──────────
-  async function stopScreenShare1() {
-    try {
-      // Read screenTrack from the ref-based snapshot to avoid stale closure
-      setScreenTrack((current) => {
-        if (!current) return null;
-
-        const { videoTrack, audioTrack, _onEnded } = current;
-
-        // Remove the track-ended listener first — prevents double-fire
-        try {
-          videoTrack.off("track-ended", _onEnded);
-        } catch {}
-
-        // Free the OS-level capture device
-        try {
-          videoTrack.stop();
-        } catch {}
-        try {
-          videoTrack.close();
-        } catch {}
-        if (audioTrack) {
-          try {
-            audioTrack.stop();
-          } catch {}
-          try {
-            audioTrack.close();
-          } catch {}
-        }
-
-        // Returning null clears state → usePublish switches back to camera
-        return null;
-      });
-    } catch (err) {
-      console.error("Stop screen share error:", err);
-    }
-  }
-
   async function stopScreenShare() {
     if (!screenTrack) return;
 
@@ -256,56 +205,11 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
 
     setScreenTrack(null);
-
-    // ✅ restore camera properly
-    // await client.publish(localCameraTrack!);
   }
 
-  // ✅ FIX: Keep the ref pointing at the latest stopScreenShare on every render
-  // This is the line that was missing before — the plain object never did this.
   stopScreenShareRef.current = stopScreenShare;
 
-  // ─── START ───────────────────────────────────────────────────────────────
-  async function startScreenShare1() {
-    try {
-      const t = await AgoraRTC.createScreenVideoTrack(
-        { encoderConfig: "1080p_1" },
-        "enable",
-      );
-
-      let videoTrack: ILocalVideoTrack | null = null;
-      let audioTrack: any = null;
-
-      if (Array.isArray(t)) {
-        [videoTrack, audioTrack] = t;
-      } else {
-        videoTrack = t as ILocalVideoTrack;
-      }
-
-      if (!videoTrack) {
-        console.error("Screen share: no video track returned");
-        return;
-      }
-
-      // ✅ FIX: The closure captures stopScreenShareRef (a stable object).
-      // stopScreenShareRef.current is updated every render above, so when
-      // track-ended fires later it always calls the LATEST stopScreenShare
-      // which has fresh state — never the stale null version.
-      const onEnded = () => stopScreenShareRef.current();
-      videoTrack.on("track-ended", onEnded);
-
-      setScreenTrack({
-        videoTrack,
-        audioTrack: audioTrack ?? undefined,
-        _onEnded: onEnded,
-      });
-    } catch (err) {
-      // User cancelled the browser picker — not a real error
-      if ((err as any)?.code !== "PERMISSION_DENIED") {
-        console.error("Screen share error:", err);
-      }
-    }
-  }
+  // ─── START ────
 
   async function startScreenShare() {
     try {
@@ -341,7 +245,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
   }
 
-  // ─── Recording ───────────────────────────────────────────────────────────
+  // ─── Recording ────
   async function startRecording() {
     setRecordingError("");
     try {
@@ -458,18 +362,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
                   className='video-track'
                 />
               )}
-              {/* <LocalVideoTrack
-                track={localCameraTrack}
-                play={!camMuted && !screenTrack}
-                className='video-track'
-              />
-              {screenTrack && (
-                <LocalVideoTrack
-                  track={screenTrack.videoTrack}
-                  play={true}
-                  className='video-track'
-                />
-              )} */}
+
               {camMuted && !screenTrack && (
                 <div className='cam-off-overlay'>
                   <span className='avatar-initial'>You</span>
