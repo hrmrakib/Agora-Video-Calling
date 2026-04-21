@@ -73,6 +73,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const [recordingError, setRecordingError] = useState("");
   const [resourceId, setResourceId] = useState("");
   const [sid, setSid] = useState("");
+  const [recordingUid, setRecordingUid] = useState("");
 
   const stopScreenShareRef = useRef<() => void>(() => {});
   const hasPublishedRef = useRef(false);
@@ -351,6 +352,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         );
       setResourceId(data.resourceId);
       setSid(data.sid);
+      setRecordingUid(data.recordingUid || "");
       setRecording(true);
       console.log("✅ Recording started:", data);
     } catch (err) {
@@ -369,7 +371,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       const res = await fetch("/api/agora-recording/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelName, resourceId, sid }),
+        body: JSON.stringify({ channelName, resourceId, sid, recordingUid }),
         signal: controller.signal,
       });
 
@@ -387,6 +389,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       setRecording(false);
       setResourceId("");
       setSid("");
+      setRecordingUid("");
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         const msg = "Recording stop timeout";
@@ -395,6 +398,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         setRecording(false);
         setResourceId("");
         setSid("");
+        setRecordingUid("");
       } else {
         const msg =
           err instanceof Error ? err.message : "Recording stop failed";

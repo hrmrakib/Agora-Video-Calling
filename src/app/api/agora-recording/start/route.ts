@@ -10,15 +10,20 @@ const auth = Buffer.from(`${CUSTOMER_ID}:${CUSTOMER_SECRET}`).toString(
   "base64",
 );
 
-const RECORDING_UID = "123456789";
+// Generate a unique recording UID per session to avoid error 53 "task conflict"
+function generateRecordingUid() {
+  return String(Math.floor(100000000 + Math.random() * 900000000));
+}
 
 // Small delay helper so the bot has a moment to settle after acquire
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function POST(req: NextRequest) {
   const { channelName, isScreenSharing } = await req.json();
+  const RECORDING_UID = generateRecordingUid();
   console.log("Start recording for channel:", channelName, {
     isScreenSharing,
+    recordingUid: RECORDING_UID,
   });
 
   if (!channelName) {
@@ -186,6 +191,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       resourceId,
       sid: startRes.data.sid,
+      recordingUid: RECORDING_UID,
     });
   } catch (err: any) {
     const agoraError = err?.response?.data;

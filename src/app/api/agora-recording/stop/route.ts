@@ -9,7 +9,7 @@ const auth = Buffer.from(`${CUSTOMER_ID}:${CUSTOMER_SECRET}`).toString(
   "base64",
 );
 
-const RECORDING_UID = "123456789";
+
 
 // Helper to poll recording status until upload completes
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,8 +76,9 @@ const pollS3UploadStatus = async (
 };
 
 export async function POST(req: NextRequest) {
-  const { channelName, resourceId, sid } = await req.json();
-  console.log("🛑 Stop recording:", { channelName, resourceId, sid });
+  const { channelName, resourceId, sid, recordingUid } = await req.json();
+  const RECORDING_UID = recordingUid || "123456789"; // fallback for old sessions
+  console.log("🛑 Stop recording:", { channelName, resourceId, sid, RECORDING_UID });
 
   if (!channelName || !resourceId || !sid) {
     return NextResponse.json(
