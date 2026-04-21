@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/globals */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
@@ -11,13 +12,9 @@ import AgoraRTC, {
   useJoin,
   useLocalCameraTrack,
   useLocalMicrophoneTrack,
-  usePublish,
-  useRemoteAudioTracks,
   useRemoteUsers,
 } from "agora-rtc-react";
 import { Disc2, DiscAlbum, User } from "lucide-react";
-
-const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 
 interface VideoCallProps {
   channelName: string;
@@ -30,7 +27,14 @@ interface ScreenTrackState {
   _onEnded: () => void;
 }
 
+// Create client inside component to avoid SSR issues
+let client: any = null;
+
 export default function VideoCall({ channelName, appId }: VideoCallProps) {
+  // Initialize client on first render (client-side only)
+  if (!client) {
+    client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+  }
   if (!appId) {
     return (
       <div className='error-screen'>
@@ -70,12 +74,21 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const [resourceId, setResourceId] = useState("");
   const [sid, setSid] = useState("");
 
-  // ✅ FIX: Real useRef — survives re-renders, no stale closure
   const stopScreenShareRef = useRef<() => void>(() => {});
+  const hasPublishedRef = useRef(false);
 
-  // Active Speaker Detection
+  // Active Speaker Detection (only enable once)
+  const audioVolumeIndicatorRef = useRef(false);
   useEffect(() => {
-    client.enableAudioVolumeIndicator();
+    if (audioVolumeIndicatorRef.current) return; // Already enabled
+
+    try {
+      client.enableAudioVolumeIndicator();
+      audioVolumeIndicatorRef.current = true;
+    } catch (err) {
+      console.warn("Audio volume indicator already enabled or unavailable");
+    }
+
     const handler = (volumes: any[]) => {
       const active = volumes.find((v) => v.level > 50);
       if (active) setActiveSpeaker(Number(active.uid));
@@ -119,33 +132,33 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
   }, [token, uid, localCameraTrack, localMicrophoneTrack]);
 
-  useEffect(() => {
-    if (localCameraTrack) return;
-    navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {});
-  }, [localCameraTrack]);
-
   const remoteUsers = useRemoteUsers();
-  const { audioTracks } = useRemoteAudioTracks(remoteUsers);
 
-  const publishTracks = [];
-  if (localMicrophoneTrack) publishTracks.push(localMicrophoneTrack);
-  if (screenTrack) {
-    publishTracks.push(screenTrack.videoTrack);
-    if (screenTrack.audioTrack) publishTracks.push(screenTrack.audioTrack);
-  } else if (localCameraTrack) {
-    publishTracks.push(localCameraTrack);
-  }
-
-  usePublish(publishTracks);
-
-  useJoin(
+  // Join the channel
+  const { isConnected } = useJoin(
     { appid: appId, channel: channelName, token: token!, uid: uid! },
     !!token && !!uid,
   );
 
+  // Publish camera + mic ONCE after joining (manual — usePublish is unreliable)
   useEffect(() => {
-    audioTracks.forEach((track) => track.play());
-  }, [audioTracks]);
+    if (!isConnected || hasPublishedRef.current) return;
+
+    const tracks: any[] = [];
+    if (localMicrophoneTrack) tracks.push(localMicrophoneTrack);
+    if (localCameraTrack) tracks.push(localCameraTrack);
+
+    if (tracks.length === 0) return;
+
+    hasPublishedRef.current = true;
+    client
+      .publish(tracks)
+      .then(() => console.log("✅ Published", tracks.length, "tracks"))
+      .catch((err: any) => {
+        hasPublishedRef.current = false;
+        console.error("❌ Publish failed:", err);
+      });
+  }, [isConnected, localMicrophoneTrack, localCameraTrack]);
 
   async function toggleMic() {
     await localMicrophoneTrack?.setMuted(!micMuted);
@@ -182,6 +195,7 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       }
       localMicrophoneTrack?.close();
       localCameraTrack?.close();
+      hasPublishedRef.current = false;
       await client.leave();
     } catch (err) {
       console.error(err);
@@ -190,18 +204,38 @@ function CallUI({ channelName, appId }: VideoCallProps) {
     }
   }
 
-  // ─── STOP (defined before start so start can reference the ref) ──────────
+  // ─── STOP screen share ────────────────────────────────────────────
   async function stopScreenShare() {
     if (!screenTrack) return;
 
     const { videoTrack, audioTrack } = screenTrack;
 
+    // 1. Unpublish screen tracks from the channel
+    try {
+      const tracksToUnpub: any[] = [videoTrack];
+      if (audioTrack) tracksToUnpub.push(audioTrack);
+      await client.unpublish(tracksToUnpub);
+      console.log("✅ Screen tracks unpublished");
+    } catch (err) {
+      console.warn("Unpublish screen error (non-fatal):", err);
+    }
+
+    // 2. Close screen tracks
     videoTrack.stop();
     videoTrack.close();
-
     if (audioTrack) {
       audioTrack.stop();
       audioTrack.close();
+    }
+
+    // 3. Re-publish camera so remote users see it again
+    if (localCameraTrack) {
+      try {
+        await client.publish(localCameraTrack);
+        console.log("✅ Camera re-published after screen share");
+      } catch (err) {
+        console.warn("Re-publish camera error:", err);
+      }
     }
 
     setScreenTrack(null);
@@ -209,16 +243,18 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
   stopScreenShareRef.current = stopScreenShare;
 
-  // ─── START ────
-
+  // ─── START screen share ──────────────────────────────────────────
   async function startScreenShare() {
     try {
-      // ❗ IMPORTANT: remove camera from stream
-      // await client.unpublish(localCameraTrack!);
-
+      // "auto" = capture system audio if supported, skip if not (macOS doesn't support it)
+      // "enable" would THROW on macOS, killing the entire screen share
       const t = await AgoraRTC.createScreenVideoTrack(
-        { encoderConfig: "1080p_1" },
-        "enable",
+        {
+          encoderConfig: "1080p_1",
+          // Hint browser to show "Entire Screen" tab first
+          displaySurface: "monitor",
+        } as any,
+        "auto",
       );
 
       let videoTrack: ILocalVideoTrack | null = null;
@@ -230,7 +266,28 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         videoTrack = t as ILocalVideoTrack;
       }
 
-      if (!videoTrack) return;
+      if (!videoTrack) {
+        console.error("Screen share: no video track returned");
+        return;
+      }
+
+      console.log("✅ Screen track created, audio:", !!audioTrack);
+
+      // 1. Unpublish camera first so remote users see screen instead
+      if (localCameraTrack) {
+        try {
+          await client.unpublish(localCameraTrack);
+          console.log("✅ Camera unpublished for screen share");
+        } catch (err) {
+          console.warn("Unpublish camera error (non-fatal):", err);
+        }
+      }
+
+      // 2. Publish screen tracks
+      const tracksToPub: any[] = [videoTrack];
+      if (audioTrack) tracksToPub.push(audioTrack);
+      await client.publish(tracksToPub);
+      console.log("✅ Screen tracks published to channel");
 
       const onEnded = () => stopScreenShareRef.current();
       videoTrack.on("track-ended", onEnded);
@@ -240,8 +297,19 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         audioTrack: audioTrack ?? undefined,
         _onEnded: onEnded,
       });
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      // User clicked "Cancel" on the browser's screen picker — not an error
+      if (err?.name === "NotAllowedError" || err?.message?.includes("Permission denied")) {
+        console.log("ℹ️ Screen share cancelled by user");
+        return;
+      }
+      console.error("Screen share failed:", err);
+      // If screen share failed mid-way, make sure camera is still published
+      if (localCameraTrack) {
+        try {
+          await client.publish(localCameraTrack);
+        } catch {}
+      }
     }
   }
 
@@ -249,13 +317,33 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   async function startRecording() {
     setRecordingError("");
     try {
+      // ✅ FIX 3: Verify that at least one track is publishing
+      if (!localCameraTrack?.enabled && !localMicrophoneTrack?.enabled) {
+        throw new Error(
+          "Cannot start recording: no audio/video tracks publishing. Please enable camera or microphone.",
+        );
+      }
+
+      // ✅ Screen Share Recording: Pass screen share status to API
+      // The API will use higher resolution (1280x720) for screen share
+      // to ensure readable content in the recording
       const res = await fetch("/api/agora-recording/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelName }),
+        body: JSON.stringify({
+          channelName,
+          isScreenSharing: !!screenTrack,
+        }),
       });
-      if (!res.ok)
-        throw new Error(`Recording start API returned ${res.status}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const detailedError =
+          errorData.setupInstructions ||
+          errorData.details ||
+          errorData.error ||
+          `Recording start API returned ${res.status}`;
+        throw new Error(detailedError);
+      }
       const data = await res.json();
       if (!data.resourceId || !data.sid)
         throw new Error(
@@ -264,9 +352,10 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       setResourceId(data.resourceId);
       setSid(data.sid);
       setRecording(true);
+      console.log("✅ Recording started:", data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Recording start failed";
-      console.error(msg);
+      console.error("❌", msg);
       setRecordingError(msg);
     }
   }
@@ -274,19 +363,44 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   async function stopRecording() {
     setRecordingError("");
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000); // 8 second timeout (async_stop: true returns fast)
+
       const res = await fetch("/api/agora-recording/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channelName, resourceId, sid }),
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`Recording stop API returned ${res.status}`);
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(
+          errorData.error || `Recording stop API returned ${res.status}`,
+        );
+      }
+
+      const data = await res.json();
+      console.log("✅ Recording stopped successfully:", data.message);
       setRecording(false);
       setResourceId("");
       setSid("");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Recording stop failed";
-      console.error(msg);
-      setRecordingError(msg);
+      if (err instanceof Error && err.name === "AbortError") {
+        const msg = "Recording stop timeout";
+        console.error(msg);
+        setRecordingError(msg);
+        setRecording(false);
+        setResourceId("");
+        setSid("");
+      } else {
+        const msg =
+          err instanceof Error ? err.message : "Recording stop failed";
+        console.error(msg);
+        setRecordingError(msg);
+      }
     }
   }
 
@@ -374,20 +488,18 @@ function CallUI({ channelName, appId }: VideoCallProps) {
               )}
             </div>
 
+            {/* Remote users — RemoteUser handles subscribe + play automatically */}
             {remoteUsers.map((user) => (
               <div
                 key={user.uid}
                 className={`video-tile ${activeSpeaker === Number(user.uid) ? "active-speaker" : ""}`}
               >
-                {user.videoTrack ? (
-                  <RemoteUser user={user} className='video-track' />
-                ) : (
-                  <div className='cam-off-overlay'>
-                    <span className='avatar-initial'>
-                      {String(user.uid).slice(0, 2)}
-                    </span>
-                  </div>
-                )}
+                <RemoteUser
+                  user={user}
+                  playVideo={true}
+                  playAudio={true}
+                  style={{ width: "100%", height: "100%" }}
+                />
                 <span className='tile-label'>User {user.uid}</span>
               </div>
             ))}

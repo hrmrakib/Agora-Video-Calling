@@ -16,8 +16,10 @@ const RECORDING_UID = "123456789";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function POST(req: NextRequest) {
-  const { channelName } = await req.json();
-  console.log("Start recording for channel:", channelName);
+  const { channelName, isScreenSharing } = await req.json();
+  console.log("Start recording for channel:", channelName, {
+    isScreenSharing,
+  });
 
   if (!channelName) {
     return NextResponse.json(
@@ -25,6 +27,60 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+
+  // ✅ Validate S3 environment variables with fallback support
+  const bucketName = process.env.AWS_STORAGE_BUCKET_NAME;
+  const accessKey = process.env.AWS_ACCESS_KEY_ID;
+  const secretKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const regionCode = process.env.AWS_S3_REGION_CODE;
+  const demoMode = process.env.DEMO_MODE === "true";
+
+  // Check if we have valid S3 config
+  const hasValidS3 = bucketName && accessKey && secretKey;
+
+  if (!hasValidS3 && !demoMode) {
+    console.error("\n❌ AWS S3 Configuration Missing");
+    console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.error("To enable recording, add to .env.local:");
+    console.error("  AWS_STORAGE_BUCKET_NAME=your-bucket-name");
+    console.error("  AWS_ACCESS_KEY_ID=your-access-key");
+    console.error("  AWS_SECRET_ACCESS_KEY=your-secret-key");
+    console.error(
+      "  AWS_S3_REGION_CODE=0  (0=US-East, 1=US-West, 8=Frankfurt, 3=Singapore)",
+    );
+    console.error("\nOr enable demo mode:");
+    console.error("  DEMO_MODE=true");
+    console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+    return NextResponse.json(
+      {
+        error: "Recording not configured",
+        details:
+          "Add AWS S3 credentials to .env.local or set DEMO_MODE=true for testing",
+        setupInstructions: "See server logs for configuration instructions",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (demoMode) {
+    console.log("ℹ️  DEMO_MODE enabled - returning mock recording response");
+    return NextResponse.json({
+      resourceId: `demo-resource-${Date.now()}`,
+      sid: `demo-sid-${Date.now()}`,
+      message: "Demo recording started (not actually recording to S3)",
+    });
+  }
+
+  console.log("✅ S3 Configuration validated:");
+  console.log("  Bucket:", bucketName);
+  console.log("  Region code:", regionCode || "0 (US East N. Virginia)");
+
+  // ✅ Screen Share Recording: Adjust resolution based on screen sharing status
+  // Screen share content needs higher resolution to be readable
+  const recordingWidth = isScreenSharing ? 1280 : 640;
+  const recordingHeight = isScreenSharing ? 720 : 360;
+  const recordingBitrate = isScreenSharing ? 1500 : 500; // Higher bitrate for screen
 
   // Build recording token for the bot UID
   const recordingToken = RtcTokenBuilder.buildTokenWithUid(
@@ -57,10 +113,15 @@ export async function POST(req: NextRequest) {
     );
 
     const resourceId = acquireRes.data.resourceId;
-    console.log("Acquired resourceId:", resourceId);
+    console.log("✅ Acquired resourceId:", resourceId);
 
-    // Give Agora a brief moment to provision the recording resource
-    await sleep(500);
+    // ✅ FIX 3a: Wait for channel to have at least one active publisher
+    // If we start recording too quickly before any streams are publishing,
+    // Agora returns error 435 (no media received)
+    console.log(
+      "⏳ Waiting 2 seconds for channel to have active publishers...",
+    );
+    await sleep(2000);
 
     // STEP 2: Start recording
     const startRes = await axios.post(
@@ -79,10 +140,10 @@ export async function POST(req: NextRequest) {
             subscribeAudioUids: ["#allstream#"],
             subscribeUidGroup: 0,
             transcodingConfig: {
-              width: 640,
-              height: 360,
-              fps: 15,
-              bitrate: 500,
+              width: recordingWidth,
+              height: recordingHeight,
+              fps: isScreenSharing ? 30 : 15, // Higher FPS for screen share
+              bitrate: recordingBitrate,
               mixedVideoLayout: 1, // 1 = best fit
               backgroundColor: "#000000",
             },
@@ -92,10 +153,17 @@ export async function POST(req: NextRequest) {
           },
           storageConfig: {
             vendor: 1, // 1 = AWS S3
-            region: 0,
-            bucket: process.env.AWS_BUCKET!,
-            accessKey: process.env.AWS_ACCESS_KEY!,
-            secretKey: process.env.AWS_SECRET_KEY!,
+            // ✅ FIX 3b: Correct S3 region mapping (must match AWS bucket region)
+            // Agora numeric codes:
+            // 0 = US East (N. Virginia)
+            // 1 = US West (Oregon)
+            // 8 = EU (Frankfurt)
+            // 3 = Asia Pacific (Singapore)
+            // Set AWS_S3_REGION_CODE in .env.local to match your bucket's region
+            region: Number(regionCode || 0),
+            bucket: bucketName,
+            accessKey: accessKey,
+            secretKey: secretKey,
             fileNamePrefix: ["recordings", channelName],
           },
         },
@@ -108,7 +176,12 @@ export async function POST(req: NextRequest) {
       },
     );
 
-    console.log("Recording started. sid:", startRes.data.sid);
+    console.log("✅ Recording started.", {
+      sid: startRes.data.sid,
+      resolution: `${recordingWidth}x${recordingHeight}`,
+      isScreenSharing,
+      bitrate: `${recordingBitrate} kbps`,
+    });
 
     return NextResponse.json({
       resourceId,
@@ -117,12 +190,30 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     const agoraError = err?.response?.data;
     const status = err?.response?.status ?? 500;
-    console.error("Agora start error:", agoraError || err.message);
+
+    // ✅ FIX 3c: Log full Agora error details for debugging
+    console.error("❌ Agora recording start error:");
+    console.error("  Status:", status);
+    console.error("  Message:", err.message);
+    console.error("  Agora response:", agoraError);
+    console.error(
+      "  Screen sharing was:",
+      isScreenSharing ? "active" : "inactive",
+    );
+
+    // Check for specific error codes
+    if (status === 435 || agoraError?.code === 435) {
+      console.error("  🚨 ERROR 435: No media/publisher in channel yet.");
+      console.error(
+        "     Ensure at least one user has published their audio/video before starting recording.",
+      );
+    }
 
     return NextResponse.json(
       {
         error: err.message,
         agoraError,
+        details: `Agora status ${status}: ${agoraError?.noticeMsg || err.message}`,
       },
       { status },
     );
