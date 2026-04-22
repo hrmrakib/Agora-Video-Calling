@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 
 interface Participant {
@@ -16,7 +17,8 @@ interface MeetingRoom {
 }
 
 // Access the same global store
-const meetingStore = (globalThis as any).__meetingStore as Map<string, MeetingRoom> ??
+const meetingStore =
+  ((globalThis as any).__meetingStore as Map<string, MeetingRoom>) ??
   ((globalThis as any).__meetingStore = new Map<string, MeetingRoom>());
 
 export async function POST(req: NextRequest) {
@@ -26,14 +28,14 @@ export async function POST(req: NextRequest) {
     if (!channelName || !hostUid || !targetUid || !action) {
       return NextResponse.json(
         { error: "channelName, hostUid, targetUid, and action are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!["approve", "reject"].includes(action)) {
       return NextResponse.json(
         { error: "action must be 'approve' or 'reject'" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (!room) {
       return NextResponse.json(
         { error: "Meeting room not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -50,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (room.host !== String(hostUid)) {
       return NextResponse.json(
         { error: "Only the host can approve or reject participants" },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
     if (!target) {
       return NextResponse.json(
         { error: "Participant not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -68,7 +70,7 @@ export async function POST(req: NextRequest) {
     target.status = action === "approve" ? "approved" : "rejected";
 
     console.log(
-      `${action === "approve" ? "✅" : "❌"} Host ${room.hostName} ${action}d ${target.displayName} (${targetUid}) in ${channelName}`
+      `${action === "approve" ? "✅" : "❌"} Host ${room.hostName} ${action}d ${target.displayName} (${targetUid}) in ${channelName}`,
     );
 
     return NextResponse.json({
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
     console.error("Respond error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

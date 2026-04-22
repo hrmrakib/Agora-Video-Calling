@@ -9,8 +9,6 @@ const auth = Buffer.from(`${CUSTOMER_ID}:${CUSTOMER_SECRET}`).toString(
   "base64",
 );
 
-
-
 // Helper to poll recording status until upload completes
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -78,13 +76,36 @@ const pollS3UploadStatus = async (
 export async function POST(req: NextRequest) {
   const { channelName, resourceId, sid, recordingUid } = await req.json();
   const RECORDING_UID = recordingUid || "123456789"; // fallback for old sessions
-  console.log("🛑 Stop recording:", { channelName, resourceId, sid, RECORDING_UID });
+  console.log("🛑 Stop recording:", {
+    channelName,
+    resourceId,
+    sid,
+    RECORDING_UID,
+  });
 
   if (!channelName || !resourceId || !sid) {
     return NextResponse.json(
       { error: "channelName, resourceId, and sid are required" },
       { status: 400 },
     );
+  }
+
+  // ── DEMO_MODE: return mock success without calling Agora ──
+  // The start API also runs in demo mode and returns a fake resourceId/sid.
+  // Calling Agora's real stop endpoint with a fake resourceId causes error code 2.
+  const demoMode = process.env.DEMO_MODE === "true";
+  if (demoMode || resourceId.startsWith("demo-")) {
+    console.log("ℹ️  DEMO_MODE: returning mock stop response");
+    return NextResponse.json({
+      success: true,
+      message: "Demo recording stopped (not actually recording to S3)",
+      s3Upload: {
+        status: "demo",
+        files: [],
+        note: "Demo mode — no real recording was made.",
+      },
+      timestamp: new Date().toISOString(),
+    });
   }
 
   try {
@@ -160,51 +181,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
-// /* eslint-disable @typescript-eslint/no-explicit-any */
-// import { NextRequest, NextResponse } from "next/server";
-// import axios from "axios";
-
-// const APP_ID = process.env.AGORA_APP_ID!;
-// const CUSTOMER_ID = process.env.AGORA_CUSTOMER_ID!;
-// const CUSTOMER_SECRET = process.env.AGORA_CUSTOMER_SECRET!;
-
-// const auth = Buffer.from(`${CUSTOMER_ID}:${CUSTOMER_SECRET}`).toString(
-//   "base64",
-// );
-
-// const RECORDING_UID = "123456789";
-
-// export async function POST(req: NextRequest) {
-//   // const { channelName, uid, resourceId, sid } = await req.json();
-//   const { channelName, resourceId, sid } = await req.json();
-
-//   console.log({ channelName, resourceId, sid });
-
-//   try {
-//     const stopRes = await axios.post(
-//       `https://api.agora.io/v1/apps/${APP_ID}/cloud_recording/resourceid/${resourceId}/sid/${sid}/mode/mix/stop`,
-//       {
-//         cname: channelName,
-//         // uid: uid.toString(),
-//         uid: RECORDING_UID,
-//         clientRequest: {},
-//       },
-//       {
-//         headers: {
-//           Authorization: `Basic ${auth}`,
-//         },
-//       },
-//     );
-
-//     console.log({ stopRes });
-
-//     return NextResponse.json(stopRes.data);
-//   } catch (err: any) {
-//     const agoraError = err?.response?.data;
-//     const status = err?.response?.status ?? 500;
-//     console.error("Agora stop error:", err);
-
-//     return NextResponse.json({ error: err.message }, { status: 500 });
-//   }
-// }

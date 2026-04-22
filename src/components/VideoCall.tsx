@@ -71,6 +71,20 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   const [tokenError, setTokenError] = useState("");
   const [uid, setUid] = useState<number | null>(null);
 
+  // ─── Persistent session ID ────────────────────────────────────
+  // Unlike the random Agora uid (which changes every page load), sessionId is
+  // stored in localStorage so the meeting room always recognises the same user.
+  // This is used ONLY for meeting-room API calls (join-request, status, leave).
+  const [sessionId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    let id = localStorage.getItem("liveroom_sessionId");
+    if (!id) {
+      id = String(Math.floor(Math.random() * 900000000) + 100000000);
+      localStorage.setItem("liveroom_sessionId", id);
+    }
+    return id;
+  });
+
   const [recording, setRecording] = useState(false);
   const [recordingError, setRecordingError] = useState("");
   const [resourceId, setResourceId] = useState("");
@@ -121,35 +135,44 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   }, [recordingStartTime, formatElapsed]);
 
   // ─── Host Approval Flow ──────────────────────────────────────
-  // Step 1: On mount, send join request to get approval status
+  // Step 1: On mount, send join request using persistent sessionId
+  // sessionId is stored in localStorage so the same browser always sends the
+  // same identity, even though the Agora uid changes on every page load.
   useEffect(() => {
-    if (!uid) return; // wait for uid from token fetch
+    if (!sessionId) return;
     async function requestJoin() {
       try {
         const res = await fetch("/api/meeting/join-request", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channelName, uid: String(uid), displayName, avatarColor }),
+          body: JSON.stringify({ channelName, uid: sessionId, displayName, avatarColor }),
         });
         const data = await res.json();
-        setApprovalStatus(data.status === "approved" ? "approved" : data.status === "rejected" ? "rejected" : "pending");
-        setIsHost(!!data.isHost);
-        setHostName(data.hostName || "");
-        if (data.isHost) setMeetingStartTime(Date.now());
+        // If server confirms this user is the host, they're always approved
+        if (data.isHost) {
+          setApprovalStatus("approved");
+          setIsHost(true);
+          setHostName(data.hostName || displayName);
+          setMeetingStartTime(Date.now());
+        } else {
+          setApprovalStatus(data.status === "approved" ? "approved" : data.status === "rejected" ? "rejected" : "pending");
+          setIsHost(false);
+          setHostName(data.hostName || "");
+        }
       } catch (err) {
         console.error("Join request failed:", err);
         setApprovalStatus("approved"); // fallback: allow join on error
       }
     }
     requestJoin();
-  }, [uid, channelName, displayName, avatarColor]);
+  }, [sessionId, channelName, displayName, avatarColor]);
 
-  // Step 2: Poll for approval status (non-hosts only)
+  // Step 2: Poll for approval status (non-hosts only) — uses sessionId
   useEffect(() => {
-    if (approvalStatus !== "pending" || !uid) return;
+    if (approvalStatus !== "pending" || !sessionId) return;
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
+        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}`);
         const data = await res.json();
         if (data.status === "approved") {
           setApprovalStatus("approved");
@@ -162,34 +185,47 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
       } catch {}
     }, 2000);
     return () => clearInterval(iv);
-  }, [approvalStatus, uid, channelName]);
+  }, [approvalStatus, sessionId, channelName]);
 
-  // Step 3: Host polls for pending requests
+  // Step 3: Host polls for pending requests + sends heartbeat — uses sessionId
   useEffect(() => {
-    if (!isHost || !uid) return;
+    if (!isHost || !sessionId) return;
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
+        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}&heartbeat=true`);
         const data = await res.json();
         if (data.pendingRequests) setPendingRequests(data.pendingRequests);
       } catch {}
     }, 2000);
     return () => clearInterval(iv);
-  }, [isHost, uid, channelName]);
+  }, [isHost, sessionId, channelName]);
 
-  // Host respond to join request
+  // Host respond to join request — uses sessionId
   async function handleApproval(targetUid: string, action: "approve" | "reject") {
     try {
       await fetch("/api/meeting/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelName, hostUid: String(uid), targetUid, action }),
+        body: JSON.stringify({ channelName, hostUid: sessionId, targetUid, action }),
       });
       setPendingRequests((prev) => prev.filter((p) => p.uid !== targetUid));
     } catch (err) {
       console.error("Approval action failed:", err);
     }
   }
+
+  // ── Cleanup on tab close / navigate away — uses sessionId ────────────────
+  // sendBeacon fires even when the page is unloading, ensuring the room is
+  // cleaned up when the host closes the tab without clicking "End call".
+  useEffect(() => {
+    if (!sessionId) return;
+    const handleUnload = () => {
+      const body = JSON.stringify({ channelName, uid: sessionId });
+      navigator.sendBeacon("/api/meeting/leave", new Blob([body], { type: "application/json" }));
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+  }, [sessionId, channelName]);
 
 
 
@@ -251,9 +287,10 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   const remoteUsers = useRemoteUsers();
 
   // Join the channel — gated behind host approval
+  // Hosts are auto-approved, so they can join as soon as token + uid are ready
   const { isConnected } = useJoin(
     { appid: appId, channel: channelName, token: token!, uid: uid! },
-    !!token && !!uid && approvalStatus === "approved",
+    !!token && !!uid && (approvalStatus === "approved" || isHost),
   );
 
   // Start meeting timer when connected (for non-hosts, it starts after approval)
@@ -355,6 +392,19 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
       localCameraTrack?.close();
       hasPublishedRef.current = false;
       await client.leave();
+
+      // ── Clean up the meeting room so the host can re-host the same channel ──
+      if (sessionId) {
+        try {
+          await fetch("/api/meeting/leave", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ channelName, uid: sessionId }),
+          });
+        } catch {
+          // Non-fatal: room will expire via heartbeat TTL anyway
+        }
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -580,7 +630,8 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   }
 
   // ─── Lobby Screen (waiting for host approval) ─────────────────
-  if (approvalStatus === "checking" || approvalStatus === "pending") {
+  // Note: if the server confirmed this user is the host, skip the lobby entirely
+  if (!isHost && (approvalStatus === "checking" || approvalStatus === "pending")) {
     return (
       <div className='lobby-screen'>
         <style>{lobbyStyles}</style>

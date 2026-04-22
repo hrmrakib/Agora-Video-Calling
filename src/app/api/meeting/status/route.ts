@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 
 interface Participant {
@@ -13,6 +14,7 @@ interface MeetingRoom {
   hostName: string;
   participants: Participant[];
   createdAt: number;
+  hostLastSeen?: number; // updated by heartbeat every 2s while host is connected
 }
 
 // Access the same global store
@@ -24,6 +26,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const channelName = searchParams.get("channelName");
     const uid = searchParams.get("uid");
+    const heartbeat = searchParams.get("heartbeat") === "true";
 
     if (!channelName || !uid) {
       return NextResponse.json(
@@ -42,6 +45,14 @@ export async function GET(req: NextRequest) {
     }
 
     const isHost = room.host === String(uid);
+
+    // ── Heartbeat: record that the host is still alive ──────────────────────
+    // The host polls this endpoint every 2 seconds with heartbeat=true.
+    // If hostLastSeen goes stale (>20s), join-request will reset the room.
+    if (isHost && heartbeat) {
+      room.hostLastSeen = Date.now();
+    }
+
     const self = room.participants.find((p) => p.uid === String(uid));
 
     // Build response
