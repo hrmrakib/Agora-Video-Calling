@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import AgoraRTC, {
   AgoraRTCProvider,
@@ -14,11 +14,13 @@ import AgoraRTC, {
   useLocalMicrophoneTrack,
   useRemoteUsers,
 } from "agora-rtc-react";
-import { Disc2, DiscAlbum, User } from "lucide-react";
+import { Disc2, DiscAlbum } from "lucide-react";
 
 interface VideoCallProps {
   channelName: string;
   appId: string;
+  displayName?: string;
+  avatarColor?: string;
 }
 
 interface ScreenTrackState {
@@ -30,7 +32,7 @@ interface ScreenTrackState {
 // Create client inside component to avoid SSR issues
 let client: any = null;
 
-export default function VideoCall({ channelName, appId }: VideoCallProps) {
+export default function VideoCall({ channelName, appId, displayName = "Guest", avatarColor = "#6366f1" }: VideoCallProps) {
   // Initialize client on first render (client-side only)
   if (!client) {
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
@@ -51,12 +53,12 @@ export default function VideoCall({ channelName, appId }: VideoCallProps) {
   }
   return (
     <AgoraRTCProvider client={client}>
-      <CallUI channelName={channelName} appId={appId} />
+      <CallUI channelName={channelName} appId={appId} displayName={displayName} avatarColor={avatarColor} />
     </AgoraRTCProvider>
   );
 }
 
-function CallUI({ channelName, appId }: VideoCallProps) {
+function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#6366f1" }: VideoCallProps) {
   const router = useRouter();
   const [micMuted, setMicMuted] = useState(false);
   const [camMuted, setCamMuted] = useState(false);
@@ -75,8 +77,121 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const [sid, setSid] = useState("");
   const [recordingUid, setRecordingUid] = useState("");
 
+  // ─── Meeting Timer ──────────────────────────────────────────────
+  const [meetingStartTime, setMeetingStartTime] = useState<number | null>(null);
+  const [meetingElapsed, setMeetingElapsed] = useState("00:00:00");
+
+  // ─── Recording Timer ──────────────────────────────────────────
+  const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
+  const [recordingElapsed, setRecordingElapsed] = useState("00:00:00");
+
+  // ─── Host Approval ────────────────────────────────────────────
+  const [approvalStatus, setApprovalStatus] = useState<"checking" | "approved" | "pending" | "rejected">("checking");
+  const [isHost, setIsHost] = useState(false);
+  const [hostName, setHostName] = useState("");
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+
+  // ─── Remote user display names ────────────────────────────────
+  const [remoteNames, setRemoteNames] = useState<Record<string, { name: string; color: string }>>({});
+
   const stopScreenShareRef = useRef<() => void>(() => {});
   const hasPublishedRef = useRef(false);
+
+  // ─── Timer utility ────────────────────────────────────────────
+  const formatElapsed = useCallback((startMs: number) => {
+    const diff = Math.floor((Date.now() - startMs) / 1000);
+    const h = String(Math.floor(diff / 3600)).padStart(2, "0");
+    const m = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
+    const s = String(diff % 60).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  }, []);
+
+  // ─── Meeting Timer Effect ─────────────────────────────────────
+  useEffect(() => {
+    if (!meetingStartTime) return;
+    const iv = setInterval(() => setMeetingElapsed(formatElapsed(meetingStartTime)), 1000);
+    return () => clearInterval(iv);
+  }, [meetingStartTime, formatElapsed]);
+
+  // ─── Recording Timer Effect ───────────────────────────────────
+  useEffect(() => {
+    if (!recordingStartTime) return;
+    const iv = setInterval(() => setRecordingElapsed(formatElapsed(recordingStartTime)), 1000);
+    return () => clearInterval(iv);
+  }, [recordingStartTime, formatElapsed]);
+
+  // ─── Host Approval Flow ──────────────────────────────────────
+  // Step 1: On mount, send join request to get approval status
+  useEffect(() => {
+    if (!uid) return; // wait for uid from token fetch
+    async function requestJoin() {
+      try {
+        const res = await fetch("/api/meeting/join-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channelName, uid: String(uid), displayName, avatarColor }),
+        });
+        const data = await res.json();
+        setApprovalStatus(data.status === "approved" ? "approved" : data.status === "rejected" ? "rejected" : "pending");
+        setIsHost(!!data.isHost);
+        setHostName(data.hostName || "");
+        if (data.isHost) setMeetingStartTime(Date.now());
+      } catch (err) {
+        console.error("Join request failed:", err);
+        setApprovalStatus("approved"); // fallback: allow join on error
+      }
+    }
+    requestJoin();
+  }, [uid, channelName, displayName, avatarColor]);
+
+  // Step 2: Poll for approval status (non-hosts only)
+  useEffect(() => {
+    if (approvalStatus !== "pending" || !uid) return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
+        const data = await res.json();
+        if (data.status === "approved") {
+          setApprovalStatus("approved");
+          setMeetingStartTime(Date.now());
+          clearInterval(iv);
+        } else if (data.status === "rejected") {
+          setApprovalStatus("rejected");
+          clearInterval(iv);
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [approvalStatus, uid, channelName]);
+
+  // Step 3: Host polls for pending requests
+  useEffect(() => {
+    if (!isHost || !uid) return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${uid}`);
+        const data = await res.json();
+        if (data.pendingRequests) setPendingRequests(data.pendingRequests);
+      } catch {}
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [isHost, uid, channelName]);
+
+  // Host respond to join request
+  async function handleApproval(targetUid: string, action: "approve" | "reject") {
+    try {
+      await fetch("/api/meeting/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelName, hostUid: String(uid), targetUid, action }),
+      });
+      setPendingRequests((prev) => prev.filter((p) => p.uid !== targetUid));
+    } catch (err) {
+      console.error("Approval action failed:", err);
+    }
+  }
+
+
 
   // Active Speaker Detection (only enable once)
   const audioVolumeIndicatorRef = useRef(false);
@@ -135,11 +250,18 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
   const remoteUsers = useRemoteUsers();
 
-  // Join the channel
+  // Join the channel — gated behind host approval
   const { isConnected } = useJoin(
     { appid: appId, channel: channelName, token: token!, uid: uid! },
-    !!token && !!uid,
+    !!token && !!uid && approvalStatus === "approved",
   );
+
+  // Start meeting timer when connected (for non-hosts, it starts after approval)
+  useEffect(() => {
+    if (isConnected && !meetingStartTime) {
+      setMeetingStartTime(Date.now());
+    }
+  }, [isConnected, meetingStartTime]);
 
   // Publish camera + mic ONCE after joining (manual — usePublish is unreliable)
   useEffect(() => {
@@ -160,6 +282,41 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         console.error("❌ Publish failed:", err);
       });
   }, [isConnected, localMicrophoneTrack, localCameraTrack]);
+
+  // ─── Stream messages for display name sync ────────────────────
+  useEffect(() => {
+    if (!isConnected) return;
+    const msg = JSON.stringify({ type: "name", uid: String(uid), name: displayName, color: avatarColor });
+    try {
+      const encoder = new TextEncoder();
+      client.sendStreamMessage(encoder.encode(msg));
+    } catch {}
+    const handler = (_remoteUid: any, data: Uint8Array) => {
+      try {
+        const text = new TextDecoder().decode(data);
+        const parsed = JSON.parse(text);
+        if (parsed.type === "name" && parsed.uid) {
+          setRemoteNames((prev) => ({ ...prev, [parsed.uid]: { name: parsed.name, color: parsed.color } }));
+        }
+      } catch {}
+    };
+    client.on("stream-message", handler);
+    return () => { client.off("stream-message", handler); };
+  }, [isConnected, uid, displayName, avatarColor]);
+
+  // Re-broadcast name when new remote user joins
+  const remoteUserCountRef = useRef(0);
+  useEffect(() => {
+    if (!isConnected || remoteUsers.length <= remoteUserCountRef.current) {
+      remoteUserCountRef.current = remoteUsers.length;
+      return;
+    }
+    remoteUserCountRef.current = remoteUsers.length;
+    try {
+      const msg = JSON.stringify({ type: "name", uid: String(uid), name: displayName, color: avatarColor });
+      client.sendStreamMessage(new TextEncoder().encode(msg));
+    } catch {}
+  }, [remoteUsers.length, isConnected, uid, displayName, avatarColor]);
 
   async function toggleMic() {
     await localMicrophoneTrack?.setMuted(!micMuted);
@@ -354,6 +511,8 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       setSid(data.sid);
       setRecordingUid(data.recordingUid || "");
       setRecording(true);
+      setRecordingStartTime(Date.now());
+      setRecordingElapsed("00:00:00");
       console.log("✅ Recording started:", data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Recording start failed";
@@ -387,6 +546,8 @@ function CallUI({ channelName, appId }: VideoCallProps) {
       const data = await res.json();
       console.log("✅ Recording stopped successfully:", data.message);
       setRecording(false);
+      setRecordingStartTime(null);
+      setRecordingElapsed("00:00:00");
       setResourceId("");
       setSid("");
       setRecordingUid("");
@@ -396,6 +557,8 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         console.error(msg);
         setRecordingError(msg);
         setRecording(false);
+        setRecordingStartTime(null);
+        setRecordingElapsed("00:00:00");
         setResourceId("");
         setSid("");
         setRecordingUid("");
@@ -411,6 +574,57 @@ function CallUI({ channelName, appId }: VideoCallProps) {
   const isLoading = !token || isLoadingMic || isLoadingCam;
   const total = remoteUsers.length + 1;
   const gridCols = total === 1 ? 1 : total <= 4 ? 2 : 3;
+
+  function getInitials(name: string) {
+    return name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  }
+
+  // ─── Lobby Screen (waiting for host approval) ─────────────────
+  if (approvalStatus === "checking" || approvalStatus === "pending") {
+    return (
+      <div className='lobby-screen'>
+        <style>{lobbyStyles}</style>
+        <div className='lobby-card'>
+          <div className='lobby-avatar' style={{ background: avatarColor }}>
+            {getInitials(displayName)}
+          </div>
+          <h2 className='lobby-title'>
+            {approvalStatus === "checking" ? "Connecting…" : "Waiting for approval"}
+          </h2>
+          <p className='lobby-sub'>
+            {approvalStatus === "checking"
+              ? "Setting up your connection…"
+              : `The host (${hostName}) needs to approve your request to join.`}
+          </p>
+          <div className='lobby-spinner-wrap'>
+            <span className='spinner' />
+          </div>
+          <button className='lobby-cancel-btn' onClick={() => router.push("/")}>
+            ← Cancel and go back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Rejected Screen ──────────────────────────────────────────
+  if (approvalStatus === "rejected") {
+    return (
+      <div className='lobby-screen'>
+        <style>{lobbyStyles}</style>
+        <div className='lobby-card'>
+          <div className='lobby-rejected-icon'>✕</div>
+          <h2 className='lobby-title' style={{ color: "#f87171" }}>Request Denied</h2>
+          <p className='lobby-sub'>
+            The host has denied your request to join this meeting.
+          </p>
+          <button className='lobby-cancel-btn' onClick={() => router.push("/")}>
+            ← Back to home
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (tokenError) {
     return (
@@ -440,11 +654,46 @@ function CallUI({ channelName, appId }: VideoCallProps) {
             LIVE
           </span>
           <span className='channel-name'># {channelName}</span>
+          {meetingStartTime && (
+            <span className='meeting-timer'>
+              <ClockIcon /> {meetingElapsed}
+            </span>
+          )}
         </div>
-        <span className='participant-count'>
-          {total} participant{total !== 1 ? "s" : ""}
-        </span>
+        <div className='header-right'>
+          {recording && (
+            <span className='rec-badge'>
+              <span className='rec-dot' />
+              REC {recordingElapsed}
+            </span>
+          )}
+          <span className='participant-count'>
+            {total} participant{total !== 1 ? "s" : ""}
+          </span>
+          {isHost && <span className='host-badge'>HOST</span>}
+        </div>
       </div>
+
+      {/* Pending approval toasts (host only) */}
+      {isHost && pendingRequests.length > 0 && (
+        <div className='pending-toasts'>
+          {pendingRequests.map((req) => (
+            <div key={req.uid} className='pending-toast'>
+              <div className='pending-toast-avatar' style={{ background: req.avatarColor || "#6366f1" }}>
+                {getInitials(req.displayName)}
+              </div>
+              <div className='pending-toast-info'>
+                <span className='pending-toast-name'>{req.displayName}</span>
+                <span className='pending-toast-msg'>wants to join</span>
+              </div>
+              <div className='pending-toast-actions'>
+                <button className='approve-btn' onClick={() => handleApproval(req.uid, "approve")}>✓ Admit</button>
+                <button className='reject-btn' onClick={() => handleApproval(req.uid, "reject")}>✕ Deny</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Recording error banner */}
       {recordingError && (
@@ -483,30 +732,37 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 
               {camMuted && !screenTrack && (
                 <div className='cam-off-overlay'>
-                  <span className='avatar-initial'>You</span>
+                  <span className='avatar-initial' style={{ background: avatarColor, borderColor: avatarColor + "44" }}>
+                    {getInitials(displayName)}
+                  </span>
                 </div>
               )}
-              <span className='tile-label'>You {micMuted ? "🔇" : ""}</span>
+              <span className='tile-label'>{displayName} {micMuted ? "🔇" : ""}</span>
               {screenTrack && (
                 <span className='screen-share-badge'>Sharing screen</span>
               )}
             </div>
 
             {/* Remote users — RemoteUser handles subscribe + play automatically */}
-            {remoteUsers.map((user) => (
-              <div
-                key={user.uid}
-                className={`video-tile ${activeSpeaker === Number(user.uid) ? "active-speaker" : ""}`}
-              >
-                <RemoteUser
-                  user={user}
-                  playVideo={true}
-                  playAudio={true}
-                  style={{ width: "100%", height: "100%" }}
-                />
-                <span className='tile-label'>User {user.uid}</span>
-              </div>
-            ))}
+            {remoteUsers.map((user) => {
+              const rn = remoteNames[String(user.uid)];
+              const remoteName = rn?.name || `User ${user.uid}`;
+              const remoteColor = rn?.color || "#6366f1";
+              return (
+                <div
+                  key={user.uid}
+                  className={`video-tile ${activeSpeaker === Number(user.uid) ? "active-speaker" : ""}`}
+                >
+                  <RemoteUser
+                    user={user}
+                    playVideo={true}
+                    playAudio={true}
+                    style={{ width: "100%", height: "100%" }}
+                  />
+                  <span className='tile-label'>{remoteName}</span>
+                </div>
+              );
+            })}
           </>
         )}
       </div>
@@ -515,12 +771,21 @@ function CallUI({ channelName, appId }: VideoCallProps) {
         <div className='sidebar'>
           <h3>Participants</h3>
           <ul>
-            <li>You ({uid})</li>
-            {remoteUsers.map((u, inx: number) => (
-              <li key={u.uid} className='flex items-center gap-1'>
-                {inx + 1}: <User size={16} /> User {u.uid}
-              </li>
-            ))}
+            <li style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className='sidebar-avatar' style={{ background: avatarColor }}>{getInitials(displayName)}</span>
+              {displayName} (You){isHost ? " ★" : ""}
+            </li>
+            {remoteUsers.map((u) => {
+              const rn = remoteNames[String(u.uid)];
+              const rName = rn?.name || `User ${u.uid}`;
+              const rColor = rn?.color || "#6366f1";
+              return (
+                <li key={u.uid} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span className='sidebar-avatar' style={{ background: rColor }}>{getInitials(rName)}</span>
+                  {rName}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -581,6 +846,12 @@ function CallUI({ channelName, appId }: VideoCallProps) {
 }
 
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
+const ClockIcon = () => (
+  <svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+    <circle cx='12' cy='12' r='10' />
+    <polyline points='12 6 12 12 16 14' />
+  </svg>
+);
 const MicIcon = () => (
   <svg
     width='20'
@@ -841,6 +1112,74 @@ const callStyles = `
 }
 .sidebar h3 { font-size: 14px; margin-bottom: 10px; }
 .sidebar ul { list-style: none; padding: 0; font-size: 13px; }
+.sidebar li { padding: 6px 0; border-bottom: 1px solid #1a1a28; }
+.sidebar-avatar {
+  width: 24px; height: 24px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 10px;
+  font-weight: 700; color: #fff; flex-shrink: 0;
+}
+
+/* ─── Header extras ─── */
+.header-right { display: flex; align-items: center; gap: 12px; }
+.meeting-timer {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 13px; font-weight: 600; color: #8888aa;
+  background: #161622; border: 1px solid #1e1e30;
+  border-radius: 6px; padding: 3px 8px; font-variant-numeric: tabular-nums;
+}
+.rec-badge {
+  display: flex; align-items: center; gap: 5px;
+  background: #3a0f0f; border: 1px solid #5a1a1a;
+  border-radius: 6px; padding: 3px 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #f87171;
+  font-variant-numeric: tabular-nums;
+}
+.rec-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #f87171;
+  animation: blink 1s ease-in-out infinite;
+}
+.host-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  color: #eab308; background: #2a2400; border: 1px solid #3a3400;
+  border-radius: 6px; padding: 3px 8px;
+}
+
+/* ─── Pending approval toasts ─── */
+.pending-toasts {
+  position: fixed; top: 70px; right: 20px; z-index: 100;
+  display: flex; flex-direction: column; gap: 8px; max-width: 360px;
+}
+.pending-toast {
+  display: flex; align-items: center; gap: 12px;
+  background: #111118; border: 1px solid #1e1e2e; border-radius: 14px;
+  padding: 12px 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: slideIn 0.3s ease-out;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.pending-toast-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.pending-toast-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.pending-toast-name { font-size: 14px; font-weight: 600; color: #e2e2f0; }
+.pending-toast-msg { font-size: 12px; color: #6b6b85; }
+.pending-toast-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.approve-btn {
+  background: #166534; border: 1px solid #22c55e40; border-radius: 8px;
+  padding: 5px 12px; color: #86efac; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: background 0.15s;
+}
+.approve-btn:hover { background: #15803d; }
+.reject-btn {
+  background: #3a0f0f; border: 1px solid #5a1a1a; border-radius: 8px;
+  padding: 5px 12px; color: #fca5a5; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: background 0.15s;
+}
+.reject-btn:hover { background: #4a1414; }
 `;
 
 const errorStyles = `
@@ -856,4 +1195,46 @@ const errorStyles = `
   padding: 0.6rem 1.2rem; color: #b0b0cc; cursor: pointer; font-size: 14px; font-family: inherit;
 }
 .back-btn:hover { background: #1e1e2e; color: #e2e2f0; }
+`;
+
+const lobbyStyles = `
+.lobby-screen {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: #07070d; font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  padding: 2rem;
+}
+.lobby-card {
+  width: 100%; max-width: 400px; background: #111118;
+  border: 1px solid #1e1e2e; border-radius: 20px; padding: 2.5rem;
+  text-align: center; animation: fadeIn 0.4s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.lobby-avatar {
+  width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 1.5rem;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700; color: #fff;
+  border: 3px solid rgba(255,255,255,0.1);
+  box-shadow: 0 0 24px rgba(99,102,241,0.2);
+}
+.lobby-title { font-size: 1.4rem; font-weight: 700; color: #e2e2f0; margin: 0 0 0.5rem; }
+.lobby-sub { font-size: 14px; color: #6b6b85; line-height: 1.6; margin: 0 0 1.5rem; }
+.lobby-spinner-wrap { display: flex; justify-content: center; margin-bottom: 1.5rem; }
+.lobby-spinner-wrap .spinner {
+  width: 28px; height: 28px;
+  border: 2px solid #1e1e30; border-top-color: #6366f1;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.lobby-cancel-btn {
+  background: #161622; border: 1px solid #1e1e30; border-radius: 10px;
+  padding: 0.6rem 1.2rem; color: #b0b0cc; cursor: pointer;
+  font-size: 14px; font-family: inherit; transition: background 0.15s, color 0.15s;
+}
+.lobby-cancel-btn:hover { background: #1e1e2e; color: #e2e2f0; }
+.lobby-rejected-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: #3a0f0f; border: 2px solid #5a1a1a;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; color: #f87171; margin: 0 auto 1.5rem;
+}
 `;

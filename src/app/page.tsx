@@ -1,27 +1,68 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+
+const AVATAR_COLORS = [
+  "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e",
+  "#f97316", "#eab308", "#22c55e", "#06b6d4",
+];
 
 export default function Home() {
   const router = useRouter();
   const [channelName, setChannelName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [avatarColor, setAvatarColor] = useState(AVATAR_COLORS[0]);
   const [error, setError] = useState("");
+
+  // Restore saved name & color from localStorage
+  useEffect(() => {
+    const savedName = localStorage.getItem("liveroom_displayName");
+    const savedColor = localStorage.getItem("liveroom_avatarColor");
+    if (savedName) setDisplayName(savedName);
+    if (savedColor && AVATAR_COLORS.includes(savedColor)) setAvatarColor(savedColor);
+  }, []);
+
+  function getInitials(name: string) {
+    return name
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    const trimmed = channelName.trim();
-    if (!trimmed) {
+    const trimmedName = displayName.trim();
+    if (!trimmedName) {
+      setError("Please enter your display name.");
+      return;
+    }
+
+    const trimmedChannel = channelName.trim();
+    if (!trimmedChannel) {
       setError("Please enter a channel name.");
       return;
     }
 
-    if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmedChannel)) {
       setError("Only letters, numbers, hyphens, and underscores are allowed.");
       return;
     }
-    router.push(`/channel/${encodeURIComponent(trimmed)}`);
+
+    // Persist to localStorage
+    localStorage.setItem("liveroom_displayName", trimmedName);
+    localStorage.setItem("liveroom_avatarColor", avatarColor);
+
+    // Navigate with profile params
+    const params = new URLSearchParams({
+      name: trimmedName,
+      color: avatarColor,
+    });
+    router.push(`/channel/${encodeURIComponent(trimmedChannel)}?${params.toString()}`);
   }
 
   return (
@@ -38,11 +79,55 @@ export default function Home() {
         </h1>
 
         <p className='subline'>
-          Enter a channel name to create a new room or join an existing one.
+          Set your name, pick an avatar, and enter a channel to get started.
         </p>
 
         <form onSubmit={handleSubmit} className='join-form'>
-          <label htmlFor='channelName' className='field-label'>
+          {/* ─── Display Name ─── */}
+          <label htmlFor='displayName' className='field-label'>
+            Your name
+          </label>
+          <div className='input-row'>
+            <input
+              id='displayName'
+              type='text'
+              placeholder='e.g. John Doe'
+              value={displayName}
+              onChange={(e) => {
+                setDisplayName(e.target.value);
+                setError("");
+              }}
+              className='channel-input'
+              autoComplete='name'
+              spellCheck={false}
+              maxLength={30}
+            />
+          </div>
+
+          {/* ─── Avatar Color Picker ─── */}
+          <label className='field-label' style={{ marginTop: "12px" }}>
+            Avatar color <span className='optional-tag'>(optional)</span>
+          </label>
+          <div className='avatar-picker'>
+            <div className='avatar-preview' style={{ background: avatarColor }}>
+              {displayName.trim() ? getInitials(displayName) : "?"}
+            </div>
+            <div className='color-grid'>
+              {AVATAR_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type='button'
+                  className={`color-swatch ${avatarColor === color ? "color-swatch--active" : ""}`}
+                  style={{ background: color }}
+                  onClick={() => setAvatarColor(color)}
+                  title={color}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* ─── Channel Name ─── */}
+          <label htmlFor='channelName' className='field-label' style={{ marginTop: "12px" }}>
             Channel name
           </label>
           <div className='input-row'>
@@ -78,7 +163,7 @@ export default function Home() {
         </form>
 
         <p className='hint'>
-          No account needed &mdash; just pick a name and share it with others.
+          No account needed &mdash; just pick a name and share the channel with others.
         </p>
       </div>
 
@@ -165,6 +250,13 @@ export default function Home() {
           margin-bottom: 4px;
         }
 
+        .optional-tag {
+          text-transform: none;
+          font-weight: 400;
+          color: #3a3a50;
+          letter-spacing: 0;
+        }
+
         .input-row {
           position: relative;
         }
@@ -190,6 +282,56 @@ export default function Home() {
         .channel-input:focus {
           border-color: #6366f1;
           box-shadow: 0 0 0 3px #6366f120;
+        }
+
+        /* ─── Avatar Picker ─── */
+        .avatar-picker {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 10px 0;
+        }
+
+        .avatar-preview {
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+          font-weight: 700;
+          color: #fff;
+          flex-shrink: 0;
+          transition: background 0.2s;
+          border: 2px solid rgba(255,255,255,0.1);
+          box-shadow: 0 0 16px rgba(99,102,241,0.15);
+        }
+
+        .color-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .color-swatch {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          border: 2px solid transparent;
+          cursor: pointer;
+          transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+          padding: 0;
+        }
+
+        .color-swatch:hover {
+          transform: scale(1.15);
+        }
+
+        .color-swatch--active {
+          border-color: #fff;
+          box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+          transform: scale(1.1);
         }
 
         .error-msg {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 const VideoCall = dynamic(() => import("@/components/VideoCall"), {
@@ -18,6 +19,11 @@ interface ChannelPageProps {
 
 export default function ChannelPage({ params }: ChannelPageProps) {
   const [channelName, setChannelName] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+
+  // Extract user profile from URL search params
+  const displayName = searchParams.get("name") || "Guest";
+  const avatarColor = searchParams.get("color") || "#6366f1";
 
   useEffect(() => {
     params.then(({ channelName }) => {
@@ -31,5 +37,12 @@ export default function ChannelPage({ params }: ChannelPageProps) {
     return <div>Loading...</div>;
   }
 
-  return <VideoCall channelName={channelName} appId={appId} />;
+  return (
+    <VideoCall
+      channelName={channelName}
+      appId={appId}
+      displayName={displayName}
+      avatarColor={avatarColor}
+    />
+  );
 }
