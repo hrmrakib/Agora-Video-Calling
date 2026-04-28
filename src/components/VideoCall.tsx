@@ -32,7 +32,12 @@ interface ScreenTrackState {
 // Create client inside component to avoid SSR issues
 let client: any = null;
 
-export default function VideoCall({ channelName, appId, displayName = "Guest", avatarColor = "#6366f1" }: VideoCallProps) {
+export default function VideoCall({
+  channelName,
+  appId,
+  displayName = "Guest",
+  avatarColor = "#6366f1",
+}: VideoCallProps) {
   // Initialize client on first render (client-side only)
   if (!client) {
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
@@ -53,12 +58,22 @@ export default function VideoCall({ channelName, appId, displayName = "Guest", a
   }
   return (
     <AgoraRTCProvider client={client}>
-      <CallUI channelName={channelName} appId={appId} displayName={displayName} avatarColor={avatarColor} />
+      <CallUI
+        channelName={channelName}
+        appId={appId}
+        displayName={displayName}
+        avatarColor={avatarColor}
+      />
     </AgoraRTCProvider>
   );
 }
 
-function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#6366f1" }: VideoCallProps) {
+function CallUI({
+  channelName,
+  appId,
+  displayName = "Guest",
+  avatarColor = "#6366f1",
+}: VideoCallProps) {
   const router = useRouter();
   const [micMuted, setMicMuted] = useState(false);
   const [camMuted, setCamMuted] = useState(false);
@@ -96,17 +111,23 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   const [meetingElapsed, setMeetingElapsed] = useState("00:00:00");
 
   // ─── Recording Timer ──────────────────────────────────────────
-  const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
+  const [recordingStartTime, setRecordingStartTime] = useState<number | null>(
+    null,
+  );
   const [recordingElapsed, setRecordingElapsed] = useState("00:00:00");
 
   // ─── Host Approval ────────────────────────────────────────────
-  const [approvalStatus, setApprovalStatus] = useState<"checking" | "approved" | "pending" | "rejected">("checking");
+  const [approvalStatus, setApprovalStatus] = useState<
+    "checking" | "approved" | "pending" | "rejected"
+  >("checking");
   const [isHost, setIsHost] = useState(false);
   const [hostName, setHostName] = useState("");
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
   // ─── Remote user display names ────────────────────────────────
-  const [remoteNames, setRemoteNames] = useState<Record<string, { name: string; color: string }>>({});
+  const [remoteNames, setRemoteNames] = useState<
+    Record<string, { name: string; color: string }>
+  >({});
 
   const stopScreenShareRef = useRef<() => void>(() => {});
   const hasPublishedRef = useRef(false);
@@ -123,14 +144,20 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   // ─── Meeting Timer Effect ─────────────────────────────────────
   useEffect(() => {
     if (!meetingStartTime) return;
-    const iv = setInterval(() => setMeetingElapsed(formatElapsed(meetingStartTime)), 1000);
+    const iv = setInterval(
+      () => setMeetingElapsed(formatElapsed(meetingStartTime)),
+      1000,
+    );
     return () => clearInterval(iv);
   }, [meetingStartTime, formatElapsed]);
 
   // ─── Recording Timer Effect ───────────────────────────────────
   useEffect(() => {
     if (!recordingStartTime) return;
-    const iv = setInterval(() => setRecordingElapsed(formatElapsed(recordingStartTime)), 1000);
+    const iv = setInterval(
+      () => setRecordingElapsed(formatElapsed(recordingStartTime)),
+      1000,
+    );
     return () => clearInterval(iv);
   }, [recordingStartTime, formatElapsed]);
 
@@ -145,7 +172,12 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
         const res = await fetch("/api/meeting/join-request", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channelName, uid: sessionId, displayName, avatarColor }),
+          body: JSON.stringify({
+            channelName,
+            uid: sessionId,
+            displayName,
+            avatarColor,
+          }),
         });
         const data = await res.json();
         // If server confirms this user is the host, they're always approved
@@ -155,7 +187,13 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
           setHostName(data.hostName || displayName);
           setMeetingStartTime(Date.now());
         } else {
-          setApprovalStatus(data.status === "approved" ? "approved" : data.status === "rejected" ? "rejected" : "pending");
+          setApprovalStatus(
+            data.status === "approved"
+              ? "approved"
+              : data.status === "rejected"
+                ? "rejected"
+                : "pending",
+          );
           setIsHost(false);
           setHostName(data.hostName || "");
         }
@@ -172,7 +210,9 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
     if (approvalStatus !== "pending" || !sessionId) return;
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}`);
+        const res = await fetch(
+          `/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}`,
+        );
         const data = await res.json();
         if (data.status === "approved") {
           setApprovalStatus("approved");
@@ -192,7 +232,9 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
     if (!isHost || !sessionId) return;
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}&heartbeat=true`);
+        const res = await fetch(
+          `/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}&heartbeat=true`,
+        );
         const data = await res.json();
         if (data.pendingRequests) setPendingRequests(data.pendingRequests);
       } catch {}
@@ -201,12 +243,20 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   }, [isHost, sessionId, channelName]);
 
   // Host respond to join request — uses sessionId
-  async function handleApproval(targetUid: string, action: "approve" | "reject") {
+  async function handleApproval(
+    targetUid: string,
+    action: "approve" | "reject",
+  ) {
     try {
       await fetch("/api/meeting/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channelName, hostUid: sessionId, targetUid, action }),
+        body: JSON.stringify({
+          channelName,
+          hostUid: sessionId,
+          targetUid,
+          action,
+        }),
       });
       setPendingRequests((prev) => prev.filter((p) => p.uid !== targetUid));
     } catch (err) {
@@ -221,13 +271,14 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
     if (!sessionId) return;
     const handleUnload = () => {
       const body = JSON.stringify({ channelName, uid: sessionId });
-      navigator.sendBeacon("/api/meeting/leave", new Blob([body], { type: "application/json" }));
+      navigator.sendBeacon(
+        "/api/meeting/leave",
+        new Blob([body], { type: "application/json" }),
+      );
     };
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);
   }, [sessionId, channelName]);
-
-
 
   // Active Speaker Detection (only enable once)
   const audioVolumeIndicatorRef = useRef(false);
@@ -323,7 +374,12 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   // ─── Stream messages for display name sync ────────────────────
   useEffect(() => {
     if (!isConnected) return;
-    const msg = JSON.stringify({ type: "name", uid: String(uid), name: displayName, color: avatarColor });
+    const msg = JSON.stringify({
+      type: "name",
+      uid: String(uid),
+      name: displayName,
+      color: avatarColor,
+    });
     try {
       const encoder = new TextEncoder();
       client.sendStreamMessage(encoder.encode(msg));
@@ -333,12 +389,17 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
         const text = new TextDecoder().decode(data);
         const parsed = JSON.parse(text);
         if (parsed.type === "name" && parsed.uid) {
-          setRemoteNames((prev) => ({ ...prev, [parsed.uid]: { name: parsed.name, color: parsed.color } }));
+          setRemoteNames((prev) => ({
+            ...prev,
+            [parsed.uid]: { name: parsed.name, color: parsed.color },
+          }));
         }
       } catch {}
     };
     client.on("stream-message", handler);
-    return () => { client.off("stream-message", handler); };
+    return () => {
+      client.off("stream-message", handler);
+    };
   }, [isConnected, uid, displayName, avatarColor]);
 
   // Re-broadcast name when new remote user joins
@@ -350,7 +411,12 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
     }
     remoteUserCountRef.current = remoteUsers.length;
     try {
-      const msg = JSON.stringify({ type: "name", uid: String(uid), name: displayName, color: avatarColor });
+      const msg = JSON.stringify({
+        type: "name",
+        uid: String(uid),
+        name: displayName,
+        color: avatarColor,
+      });
       client.sendStreamMessage(new TextEncoder().encode(msg));
     } catch {}
   }, [remoteUsers.length, isConnected, uid, displayName, avatarColor]);
@@ -507,7 +573,10 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
       });
     } catch (err: any) {
       // User clicked "Cancel" on the browser's screen picker — not an error
-      if (err?.name === "NotAllowedError" || err?.message?.includes("Permission denied")) {
+      if (
+        err?.name === "NotAllowedError" ||
+        err?.message?.includes("Permission denied")
+      ) {
         console.log("ℹ️ Screen share cancelled by user");
         return;
       }
@@ -626,12 +695,21 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
   const gridCols = total === 1 ? 1 : total <= 4 ? 2 : 3;
 
   function getInitials(name: string) {
-    return name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+    return name
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
   }
 
   // ─── Lobby Screen (waiting for host approval) ─────────────────
   // Note: if the server confirmed this user is the host, skip the lobby entirely
-  if (!isHost && (approvalStatus === "checking" || approvalStatus === "pending")) {
+  if (
+    !isHost &&
+    (approvalStatus === "checking" || approvalStatus === "pending")
+  ) {
     return (
       <div className='lobby-screen'>
         <style>{lobbyStyles}</style>
@@ -640,7 +718,9 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
             {getInitials(displayName)}
           </div>
           <h2 className='lobby-title'>
-            {approvalStatus === "checking" ? "Connecting…" : "Waiting for approval"}
+            {approvalStatus === "checking"
+              ? "Connecting…"
+              : "Waiting for approval"}
           </h2>
           <p className='lobby-sub'>
             {approvalStatus === "checking"
@@ -665,7 +745,9 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
         <style>{lobbyStyles}</style>
         <div className='lobby-card'>
           <div className='lobby-rejected-icon'>✕</div>
-          <h2 className='lobby-title' style={{ color: "#f87171" }}>Request Denied</h2>
+          <h2 className='lobby-title' style={{ color: "#f87171" }}>
+            Request Denied
+          </h2>
           <p className='lobby-sub'>
             The host has denied your request to join this meeting.
           </p>
@@ -692,6 +774,8 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
       </div>
     );
   }
+
+  console.log({ isHost });
 
   return (
     <div className='call-root'>
@@ -730,7 +814,10 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
         <div className='pending-toasts'>
           {pendingRequests.map((req) => (
             <div key={req.uid} className='pending-toast'>
-              <div className='pending-toast-avatar' style={{ background: req.avatarColor || "#6366f1" }}>
+              <div
+                className='pending-toast-avatar'
+                style={{ background: req.avatarColor || "#6366f1" }}
+              >
                 {getInitials(req.displayName)}
               </div>
               <div className='pending-toast-info'>
@@ -738,8 +825,18 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
                 <span className='pending-toast-msg'>wants to join</span>
               </div>
               <div className='pending-toast-actions'>
-                <button className='approve-btn' onClick={() => handleApproval(req.uid, "approve")}>✓ Admit</button>
-                <button className='reject-btn' onClick={() => handleApproval(req.uid, "reject")}>✕ Deny</button>
+                <button
+                  className='approve-btn'
+                  onClick={() => handleApproval(req.uid, "approve")}
+                >
+                  ✓ Admit
+                </button>
+                <button
+                  className='reject-btn'
+                  onClick={() => handleApproval(req.uid, "reject")}
+                >
+                  ✕ Deny
+                </button>
               </div>
             </div>
           ))}
@@ -783,12 +880,20 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
 
               {camMuted && !screenTrack && (
                 <div className='cam-off-overlay'>
-                  <span className='avatar-initial' style={{ background: avatarColor, borderColor: avatarColor + "44" }}>
+                  <span
+                    className='avatar-initial'
+                    style={{
+                      background: avatarColor,
+                      borderColor: avatarColor + "44",
+                    }}
+                  >
                     {getInitials(displayName)}
                   </span>
                 </div>
               )}
-              <span className='tile-label'>{displayName} {micMuted ? "🔇" : ""}</span>
+              <span className='tile-label'>
+                {displayName} {micMuted ? "🔇" : ""}
+              </span>
               {screenTrack && (
                 <span className='screen-share-badge'>Sharing screen</span>
               )}
@@ -823,7 +928,12 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
           <h3>Participants</h3>
           <ul>
             <li style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span className='sidebar-avatar' style={{ background: avatarColor }}>{getInitials(displayName)}</span>
+              <span
+                className='sidebar-avatar'
+                style={{ background: avatarColor }}
+              >
+                {getInitials(displayName)}
+              </span>
               {displayName} (You){isHost ? " ★" : ""}
             </li>
             {remoteUsers.map((u) => {
@@ -831,8 +941,16 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
               const rName = rn?.name || `User ${u.uid}`;
               const rColor = rn?.color || "#6366f1";
               return (
-                <li key={u.uid} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span className='sidebar-avatar' style={{ background: rColor }}>{getInitials(rName)}</span>
+                <li
+                  key={u.uid}
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  <span
+                    className='sidebar-avatar'
+                    style={{ background: rColor }}
+                  >
+                    {getInitials(rName)}
+                  </span>
                   {rName}
                 </li>
               );
@@ -878,14 +996,16 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
           <span>{showSidebar ? "Hide" : "See"}</span>
         </button>
 
-        <button
-          onClick={recording ? stopRecording : startRecording}
-          className={`ctrl-btn ${recording ? "ctrl-btn--off" : ""}`}
-          title={recording ? "Stop recording" : "Start recording"}
-        >
-          {recording ? <DiscAlbum /> : <Disc2 />}
-          <span>{recording ? "Stop Rec" : "Record"}</span>
-        </button>
+        {isHost && (
+          <button
+            onClick={recording ? stopRecording : startRecording}
+            className={`ctrl-btn ${recording ? "ctrl-btn--off" : ""}`}
+            title={recording ? "Stop recording" : "Start recording"}
+          >
+            {recording ? <DiscAlbum /> : <Disc2 />}
+            <span>{recording ? "Stop Rec" : "Record"}</span>
+          </button>
+        )}
 
         <button className='ctrl-btn ctrl-btn--end' onClick={endCall}>
           <PhoneOffIcon />
@@ -898,7 +1018,16 @@ function CallUI({ channelName, appId, displayName = "Guest", avatarColor = "#636
 
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
 const ClockIcon = () => (
-  <svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+  <svg
+    width='14'
+    height='14'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='2'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
     <circle cx='12' cy='12' r='10' />
     <polyline points='12 6 12 12 16 14' />
   </svg>
