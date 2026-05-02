@@ -9,6 +9,90 @@ const auth = Buffer.from(`${CUSTOMER_ID}:${CUSTOMER_SECRET}`).toString(
   "base64",
 );
 
+// ─── Agora region code → AWS region string mapping ──────────────────────────
+// Agora uses numeric codes, AWS uses region strings for S3 URLs.
+const AGORA_REGION_TO_AWS: Record<number, string> = {
+  0: "us-east-1",       // US East (N. Virginia)
+  1: "us-west-2",       // US West (Oregon)
+  2: "eu-west-1",       // EU (Ireland)
+  3: "ap-southeast-1",  // Asia Pacific (Singapore)
+  4: "ap-northeast-1",  // Asia Pacific (Tokyo)
+  5: "ap-southeast-2",  // Asia Pacific (Sydney)  — Agora custom mapping
+  6: "ap-northeast-1",  // Asia Pacific (Tokyo)   — alias
+  7: "ap-south-1",      // Asia Pacific (Mumbai)
+  8: "eu-central-1",    // EU (Frankfurt)
+  9: "us-east-2",       // US East (Ohio)
+  10: "us-west-1",      // US West (N. California)
+  11: "ap-northeast-2", // Asia Pacific (Seoul)
+  15: "me-south-1",     // Middle East (Bahrain)
+  17: "eu-west-2",      // EU (London)
+};
+
+/**
+ * Construct the S3 URL for a recorded file.
+ *
+ * Agora Cloud Recording (mix mode) generates MP4 files named:
+ *   <sid>_<channelName>.mp4
+ *
+ * These are placed under the fileNamePrefix configured in storageConfig:
+ *   ["recordings", channelName]
+ *
+ * So the full path is:
+ *   recordings/<channelName>/<sid>_<channelName>.mp4
+ */
+function buildRecordingUrls(
+  sid: string,
+  channelName: string,
+  fileListFromAgora?: string[],
+) {
+  const bucket = process.env.AWS_STORAGE_BUCKET_NAME;
+  const regionCode = Number(process.env.AWS_S3_REGION_CODE || 0);
+  const awsRegion = AGORA_REGION_TO_AWS[regionCode] || "us-east-1";
+
+  // Agora replaces special characters in channel names with hyphens in filenames
+  const safeChannelName = channelName.replace(/[^a-zA-Z0-9_-]/g, "-");
+
+  const baseUrl = `https://${bucket}.s3.${awsRegion}.amazonaws.com`;
+  const prefix = `recordings/${channelName}`;
+
+  // If Agora returned actual file names, use those
+  if (fileListFromAgora && fileListFromAgora.length > 0) {
+    const mp4Files = fileListFromAgora.filter((f: string) =>
+      f.endsWith(".mp4"),
+    );
+    const m3u8Files = fileListFromAgora.filter((f: string) =>
+      f.endsWith(".m3u8"),
+    );
+    return {
+      mp4: mp4Files.map((f: string) => `${baseUrl}/${prefix}/${f}`),
+      m3u8: m3u8Files.map((f: string) => `${baseUrl}/${prefix}/${f}`),
+      allFiles: fileListFromAgora.map(
+        (f: string) => `${baseUrl}/${prefix}/${f}`,
+      ),
+      // Primary URL — first MP4 file
+      recordingUrl:
+        mp4Files.length > 0
+          ? `${baseUrl}/${prefix}/${mp4Files[0]}`
+          : `${baseUrl}/${prefix}/${fileListFromAgora[0]}`,
+    };
+  }
+
+  // Construct predicted URLs from known naming pattern
+  const mp4FileName = `${sid}_${safeChannelName}.mp4`;
+  const m3u8FileName = `${sid}_${safeChannelName}.m3u8`;
+
+  return {
+    mp4: [`${baseUrl}/${prefix}/${mp4FileName}`],
+    m3u8: [`${baseUrl}/${prefix}/${m3u8FileName}`],
+    allFiles: [
+      `${baseUrl}/${prefix}/${mp4FileName}`,
+      `${baseUrl}/${prefix}/${m3u8FileName}`,
+    ],
+    // Primary URL — the MP4 file
+    recordingUrl: `${baseUrl}/${prefix}/${mp4FileName}`,
+  };
+}
+
 // Helper to poll recording status until upload completes
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -96,13 +180,16 @@ export async function POST(req: NextRequest) {
   const demoMode = process.env.DEMO_MODE === "true";
   if (demoMode || resourceId.startsWith("demo-")) {
     console.log("ℹ️  DEMO_MODE: returning mock stop response");
+    const demoUrls = buildRecordingUrls(sid, channelName);
     return NextResponse.json({
       success: true,
       message: "Demo recording stopped (not actually recording to S3)",
+      recordingUrl: demoUrls.recordingUrl,
+      recordingUrls: demoUrls,
       s3Upload: {
         status: "demo",
         files: [],
-        note: "Demo mode — no real recording was made.",
+        note: "Demo mode — no real recording was made. URLs are predicted format.",
       },
       timestamp: new Date().toISOString(),
     });
@@ -133,22 +220,49 @@ export async function POST(req: NextRequest) {
       JSON.stringify(stopRes.data, null, 2),
     );
 
-    // STEP 2: Get file list from stop response (may be empty with async_stop: true)
-    const filesFromStop = stopRes.data?.serverResponse?.fileList || [];
-    const uploadingStatus =
-      stopRes.data?.serverResponse?.uploadingStatus || "backuped";
+    // STEP 2: Extract file list from stop response (may be empty with async_stop)
+    const serverResponse = stopRes.data?.serverResponse;
+    const filesFromStop = serverResponse?.fileList || [];
+    const uploadingStatus = serverResponse?.uploadingStatus || "backuped";
 
-    // STEP 3: Return response immediately
+    // Extract actual file names from the fileList if available
+    // Agora returns fileList as array of objects: [{ fileName: "sid_cname.mp4", ... }]
+    // or as array of strings depending on mode
+    let fileNames: string[] = [];
+    if (filesFromStop.length > 0) {
+      fileNames = filesFromStop.map((f: any) =>
+        typeof f === "string" ? f : f.fileName || f.filename || "",
+      ).filter(Boolean);
+    }
+
+    // STEP 3: Build the recording URL(s)
+    const urls = buildRecordingUrls(
+      sid,
+      channelName,
+      fileNames.length > 0 ? fileNames : undefined,
+    );
+
+    console.log("🎬 Recording URL:", urls.recordingUrl);
+    console.log("📁 All recording files:", urls.allFiles);
+
+    // STEP 4: Return response with recording URL
     const responseData = {
       success: true,
       message: "Recording stopped. Files queued for S3 upload.",
+
+      // ★ THE KEY FIELD — use this to save to your database
+      recordingUrl: urls.recordingUrl,
+
+      // All recording URLs (MP4, M3U8, etc.)
+      recordingUrls: urls,
+
       recordingData: stopRes.data,
       s3Upload: {
         status: uploadingStatus,
         uploadingStatus: uploadingStatus,
         files: filesFromStop,
         bucket: process.env.AWS_STORAGE_BUCKET_NAME,
-        region: process.env.AWS_S3_REGION_NAME,
+        region: AGORA_REGION_TO_AWS[Number(process.env.AWS_S3_REGION_CODE || 0)] || "us-east-1",
         note: "Recording stopped. Files will be uploaded to S3 within 1-5 minutes.",
       },
       timestamp: new Date().toISOString(),

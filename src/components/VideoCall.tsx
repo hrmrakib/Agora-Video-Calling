@@ -105,6 +105,8 @@ function CallUI({
   const [resourceId, setResourceId] = useState("");
   const [sid, setSid] = useState("");
   const [recordingUid, setRecordingUid] = useState("");
+  const [lastRecordingUrl, setLastRecordingUrl] = useState("");
+  const [urlCopied, setUrlCopied] = useState(false);
 
   // ─── Meeting Timer ──────────────────────────────────────────────
   const [meetingStartTime, setMeetingStartTime] = useState<number | null>(null);
@@ -664,6 +666,32 @@ function CallUI({
 
       const data = await res.json();
       console.log("✅ Recording stopped successfully:", data.message);
+
+      // ★ Capture the recording URL for database storage
+      if (data.recordingUrl) {
+        setLastRecordingUrl(data.recordingUrl);
+        setUrlCopied(false);
+        console.log("🎬 Recording URL (save to your database):", data.recordingUrl);
+        console.log("📁 All recording files:", data.recordingUrls);
+
+        // ──────────────────────────────────────────────────────────────
+        // ★ SAVE TO YOUR DATABASE HERE
+        // Uncomment and modify the code below to POST the URL to your backend:
+        //
+        // await fetch("https://your-backend.com/api/recordings", {
+        //   method: "POST",
+        //   headers: { "Content-Type": "application/json" },
+        //   body: JSON.stringify({
+        //     channelName,
+        //     recordingUrl: data.recordingUrl,
+        //     recordingUrls: data.recordingUrls,
+        //     duration: recordingElapsed,
+        //     recordedAt: new Date().toISOString(),
+        //   }),
+        // });
+        // ──────────────────────────────────────────────────────────────
+      }
+
       setRecording(false);
       setRecordingStartTime(null);
       setRecordingElapsed("00:00:00");
@@ -848,6 +876,47 @@ function CallUI({
         <div className='recording-error-banner'>
           ⚠ Recording error: {recordingError}
           <button onClick={() => setRecordingError("")}>✕</button>
+        </div>
+      )}
+
+      {/* ★ Recording URL notification — shown after recording stops */}
+      {lastRecordingUrl && (
+        <div className='recording-url-banner'>
+          <div className='recording-url-content'>
+            <span className='recording-url-icon'>🎬</span>
+            <div className='recording-url-info'>
+              <span className='recording-url-label'>Recording saved to S3</span>
+              <a
+                href={lastRecordingUrl}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='recording-url-link'
+                title={lastRecordingUrl}
+              >
+                {lastRecordingUrl.length > 80
+                  ? lastRecordingUrl.slice(0, 80) + "…"
+                  : lastRecordingUrl}
+              </a>
+            </div>
+          </div>
+          <div className='recording-url-actions'>
+            <button
+              className='recording-url-copy-btn'
+              onClick={() => {
+                navigator.clipboard.writeText(lastRecordingUrl);
+                setUrlCopied(true);
+                setTimeout(() => setUrlCopied(false), 2000);
+              }}
+            >
+              {urlCopied ? '✓ Copied' : '📋 Copy URL'}
+            </button>
+            <button
+              className='recording-url-dismiss-btn'
+              onClick={() => setLastRecordingUrl("")}
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
@@ -1221,6 +1290,50 @@ const callStyles = `
 .recording-error-banner button {
   background: none; border: none; color: #f87171; cursor: pointer; font-size: 16px; padding: 0 4px;
 }
+
+/* ─── Recording URL notification banner ─── */
+.recording-url-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 1.5rem; background: linear-gradient(135deg, #0a2e1a 0%, #0d1f16 100%);
+  border-bottom: 1px solid #166534; flex-shrink: 0;
+  animation: slideDown 0.3s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.recording-url-content {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+}
+.recording-url-icon { font-size: 18px; flex-shrink: 0; }
+.recording-url-info {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.recording-url-label {
+  font-size: 12px; font-weight: 600; color: #86efac;
+  letter-spacing: 0.03em;
+}
+.recording-url-link {
+  font-size: 12px; color: #4ade80; text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color 0.15s;
+}
+.recording-url-link:hover { color: #bbf7d0; text-decoration: underline; }
+.recording-url-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: 12px;
+}
+.recording-url-copy-btn {
+  background: #166534; border: 1px solid #22c55e40; border-radius: 6px;
+  padding: 4px 10px; color: #86efac; font-size: 11px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: background 0.15s;
+  white-space: nowrap;
+}
+.recording-url-copy-btn:hover { background: #15803d; }
+.recording-url-dismiss-btn {
+  background: none; border: none; color: #4ade80; cursor: pointer;
+  font-size: 16px; padding: 0 4px; opacity: 0.6; transition: opacity 0.15s;
+}
+.recording-url-dismiss-btn:hover { opacity: 1; }
 
 .video-grid {
   flex: 1; display: grid;
