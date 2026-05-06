@@ -1,11 +1,19 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { useGetUserProfileQuery } from "@/redux/features/user/userAPI";
 
 const AVATAR_COLORS = [
-  "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e",
-  "#f97316", "#eab308", "#22c55e", "#06b6d4",
+  "#6366f1",
+  "#8b5cf6",
+  "#ec4899",
+  "#f43f5e",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#06b6d4",
 ];
 
 export default function Home() {
@@ -15,12 +23,15 @@ export default function Home() {
   const [avatarColor, setAvatarColor] = useState(AVATAR_COLORS[0]);
   const [error, setError] = useState("");
 
+  const {} = useGetUserProfileQuery(undefined, { skip: true });
+
   // Restore saved name & color from localStorage
   useEffect(() => {
     const savedName = localStorage.getItem("liveroom_displayName");
     const savedColor = localStorage.getItem("liveroom_avatarColor");
     if (savedName) setDisplayName(savedName);
-    if (savedColor && AVATAR_COLORS.includes(savedColor)) setAvatarColor(savedColor);
+    if (savedColor && AVATAR_COLORS.includes(savedColor))
+      setAvatarColor(savedColor);
   }, []);
 
   function getInitials(name: string) {
@@ -62,7 +73,9 @@ export default function Home() {
       name: trimmedName,
       color: avatarColor,
     });
-    router.push(`/channel/${encodeURIComponent(trimmedChannel)}?${params.toString()}`);
+    router.push(
+      `/channel/${encodeURIComponent(trimmedChannel)}?${params.toString()}`,
+    );
   }
 
   return (
@@ -127,7 +140,11 @@ export default function Home() {
           </div>
 
           {/* ─── Channel Name ─── */}
-          <label htmlFor='channelName' className='field-label' style={{ marginTop: "12px" }}>
+          <label
+            htmlFor='channelName'
+            className='field-label'
+            style={{ marginTop: "12px" }}
+          >
             Channel name
           </label>
           <div className='input-row'>
@@ -163,7 +180,8 @@ export default function Home() {
         </form>
 
         <p className='hint'>
-          No account needed &mdash; just pick a name and share the channel with others.
+          No account needed &mdash; just pick a name and share the channel with
+          others.
         </p>
       </div>
 
