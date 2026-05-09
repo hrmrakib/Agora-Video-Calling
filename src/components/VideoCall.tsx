@@ -757,6 +757,7 @@ function CallUI({
   // Note: if the server confirmed this user is the host, skip the lobby entirely
 
   const baseURL = process.env.NEXT_PUBLIC_IMAGE_URL;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
