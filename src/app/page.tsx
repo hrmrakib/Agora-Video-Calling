@@ -1,56 +1,60 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect, FormEvent } from "react";
+import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { useGetUserProfileQuery } from "@/redux/features/user/userAPI";
-
-const AVATAR_COLORS = [
-  "#6366f1",
-  "#8b5cf6",
-  "#ec4899",
-  "#f43f5e",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#06b6d4",
-];
+import { useAuth } from "@/hooks/useAuth";
+import Image from "next/image";
+import { useDispatch } from "react-redux";
+import {
+  setProfileLoading,
+  setUser,
+  userTrack,
+} from "@/redux/features/auth/authSlice";
 
 export default function Home() {
+  const dispatch = useDispatch();
   const router = useRouter();
   const [channelName, setChannelName] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [avatarColor, setAvatarColor] = useState(AVATAR_COLORS[0]);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const { user } = useAuth();
+  console.log({ user });
 
-  const {} = useGetUserProfileQuery(undefined, { skip: true });
+  const baseURL = process.env.NEXT_PUBLIC_IMAGE_URL;
 
-  // Restore saved name & color from localStorage
-  useEffect(() => {
-    const savedName = localStorage.getItem("liveroom_displayName");
-    const savedColor = localStorage.getItem("liveroom_avatarColor");
-    if (savedName) setDisplayName(savedName);
-    if (savedColor && AVATAR_COLORS.includes(savedColor))
-      setAvatarColor(savedColor);
-  }, []);
-
-  function getInitials(name: string) {
-    return name
-      .trim()
-      .split(/\s+/)
-      .map((w) => w[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase();
-  }
-
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    const trimmedName = displayName.trim();
-    if (!trimmedName) {
-      setError("Please enter your display name.");
-      return;
+    if (!user) {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/accounts/login/`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        },
+      );
+
+      const data = await res.json();
+
+      if (res?.ok) {
+        dispatch(userTrack());
+        dispatch(
+          setUser({
+            user: data?.user,
+            token: data?.access_token,
+          }),
+        );
+        dispatch(setProfileLoading(false));
+
+        // await saveTokens(data?.access_token);
+        localStorage.setItem("access_token", data?.access_token);
+
+        setError("Please login to join a channel.");
+        return;
+      }
     }
 
     const trimmedChannel = channelName.trim();
@@ -64,18 +68,7 @@ export default function Home() {
       return;
     }
 
-    // Persist to localStorage
-    localStorage.setItem("liveroom_displayName", trimmedName);
-    localStorage.setItem("liveroom_avatarColor", avatarColor);
-
-    // Navigate with profile params
-    const params = new URLSearchParams({
-      name: trimmedName,
-      color: avatarColor,
-    });
-    router.push(
-      `/channel/${encodeURIComponent(trimmedChannel)}?${params.toString()}`,
-    );
+    router.push(`/channel/${encodeURIComponent(trimmedChannel)}`);
   }
 
   return (
@@ -87,8 +80,7 @@ export default function Home() {
         </div>
 
         <h1 className='headline'>
-          Start or join a<br />
-          <span className='headline-accent'>video call</span>
+          Start or join a <span className='headline-accent'>video call</span>
         </h1>
 
         <p className='subline'>
@@ -97,47 +89,73 @@ export default function Home() {
 
         <form onSubmit={handleSubmit} className='join-form'>
           {/* ─── Display Name ─── */}
-          <label htmlFor='displayName' className='field-label'>
-            Your name
-          </label>
-          <div className='input-row'>
-            <input
-              id='displayName'
-              type='text'
-              placeholder='e.g. John Doe'
-              value={displayName}
-              onChange={(e) => {
-                setDisplayName(e.target.value);
-                setError("");
-              }}
-              className='channel-input'
-              autoComplete='name'
-              spellCheck={false}
-              maxLength={30}
-            />
-          </div>
-
-          {/* ─── Avatar Color Picker ─── */}
-          <label className='field-label' style={{ marginTop: "12px" }}>
-            Avatar color <span className='optional-tag'>(optional)</span>
-          </label>
-          <div className='avatar-picker'>
-            <div className='avatar-preview' style={{ background: avatarColor }}>
-              {displayName.trim() ? getInitials(displayName) : "?"}
-            </div>
-            <div className='color-grid'>
-              {AVATAR_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type='button'
-                  className={`color-swatch ${avatarColor === color ? "color-swatch--active" : ""}`}
-                  style={{ background: color }}
-                  onClick={() => setAvatarColor(color)}
-                  title={color}
+          {user ? (
+            <div>
+              <h2 className='field-label text-xl! text-center! mb-2!'>
+                <span className='text-[#ffffff]!'>{user?.full_name}</span>
+              </h2>
+              <div className='flex items-center justify-center'>
+                <Image
+                  src={
+                    ((baseURL! + user?.profile_pic) as string) ||
+                    "/placeholder.png"
+                  }
+                  width={100}
+                  height={100}
+                  unoptimized
+                  alt={user?.full_name as string | "photo"}
+                  className='w-20 h-20 rounded-full'
                 />
-              ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <h2 className='text-center!'>
+                Login - First Time{" "}
+                <span className='text-[#6366f1]!'>(No repeated)</span>
+              </h2>
+
+              <div className='input-row space-y-2.5!'>
+                <label className='field-label' style={{ marginTop: "12px" }}>
+                  Email
+                </label>
+                <input
+                  id='email'
+                  type='email'
+                  placeholder='example@mail.com'
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError("");
+                  }}
+                  className='channel-input mt-1!'
+                  autoComplete='name'
+                  spellCheck={false}
+                  maxLength={30}
+                />
+              </div>
+
+              <div className='input-row space-y-2.5! mt-4!'>
+                <label className='field-label ' style={{ marginTop: "20px" }}>
+                  Password
+                </label>
+                <input
+                  id='password'
+                  type='password'
+                  placeholder='******'
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError("");
+                  }}
+                  className='channel-input mt-1!'
+                  autoComplete='password'
+                  spellCheck={false}
+                  maxLength={30}
+                />
+              </div>
+            </div>
+          )}
 
           {/* ─── Channel Name ─── */}
           <label
@@ -178,11 +196,6 @@ export default function Home() {
             </svg>
           </button>
         </form>
-
-        <p className='hint'>
-          No account needed &mdash; just pick a name and share the channel with
-          others.
-        </p>
       </div>
 
       <style>{`

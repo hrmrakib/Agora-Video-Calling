@@ -40,6 +40,7 @@ const customBaseQuery: BaseQueryFn<
   }
 
   const pathname = window?.location?.pathname || "";
+  const main_web_url = process.env.NEXT_PUBLIC_MAIN_WEB_UEL;
 
   if (result.error) {
     const status = result.error.status;
@@ -52,15 +53,11 @@ const customBaseQuery: BaseQueryFn<
 
         setTimeout(() => {
           isLoggingOut = false;
-          window.location.replace("/login");
+          window.location.replace(main_web_url + "/login");
+
+          window.close();
         }, 400);
       }
-    } else if (status === 403) {
-      toast.error("You need to verify your email to use this feature.");
-      window.location.href = "/profile";
-    } else if (status === 402) {
-      toast.error("You need to upgrade your plan to use this feature.");
-      window.location.href = "/#upgrade-plan";
     }
 
     return result;
