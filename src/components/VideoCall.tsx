@@ -149,7 +149,7 @@ function CallUI({
     Record<string, { name: string; color: string }>
   >({});
 
-  const stopScreenShareRef = useRef<() => void>(() => { });
+  const stopScreenShareRef = useRef<() => void>(() => {});
   const hasPublishedRef = useRef(false);
 
   // ─── Timer utility ────────────────────────────────────────────
@@ -242,7 +242,7 @@ function CallUI({
           setApprovalStatus("rejected");
           clearInterval(iv);
         }
-      } catch { }
+      } catch {}
     }, 2000);
     return () => clearInterval(iv);
   }, [approvalStatus, sessionId, channelName]);
@@ -257,7 +257,7 @@ function CallUI({
         );
         const data = await res.json();
         if (data.pendingRequests) setPendingRequests(data.pendingRequests);
-      } catch { }
+      } catch {}
     }, 2000);
     return () => clearInterval(iv);
   }, [isHost, sessionId, channelName]);
@@ -403,7 +403,7 @@ function CallUI({
     try {
       const encoder = new TextEncoder();
       client.sendStreamMessage(encoder.encode(msg));
-    } catch { }
+    } catch {}
     const handler = (_remoteUid: any, data: Uint8Array) => {
       try {
         const text = new TextDecoder().decode(data);
@@ -414,7 +414,7 @@ function CallUI({
             [parsed.uid]: { name: parsed.name, color: parsed.color },
           }));
         }
-      } catch { }
+      } catch {}
     };
     client.on("stream-message", handler);
     return () => {
@@ -438,7 +438,7 @@ function CallUI({
         color: avatarColor,
       });
       client.sendStreamMessage(new TextEncoder().encode(msg));
-    } catch { }
+    } catch {}
   }, [remoteUsers.length, isConnected, uid, displayName, avatarColor]);
 
   async function toggleMic() {
@@ -457,20 +457,20 @@ function CallUI({
         const { videoTrack, audioTrack, _onEnded } = screenTrack;
         try {
           videoTrack.off("track-ended", _onEnded);
-        } catch { }
+        } catch {}
         try {
           videoTrack.stop();
-        } catch { }
+        } catch {}
         try {
           videoTrack.close();
-        } catch { }
+        } catch {}
         if (audioTrack) {
           try {
             audioTrack.stop();
-          } catch { }
+          } catch {}
           try {
             audioTrack.close();
-          } catch { }
+          } catch {}
         }
         setScreenTrack(null);
       }
@@ -605,7 +605,7 @@ function CallUI({
       if (localCameraTrack) {
         try {
           await client.publish(localCameraTrack);
-        } catch { }
+        } catch {}
       }
     }
   }
@@ -683,7 +683,7 @@ function CallUI({
       }
 
       const data = await res.json();
-      console.log("✅ Recording stopped successfully:", data.message);
+      console.log("✅ Recording stopped successfully:", { data }, data.message);
 
       // ★ Capture the recording URL for database storage
       if (data.recordingUrl) {
