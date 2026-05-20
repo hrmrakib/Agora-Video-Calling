@@ -24,6 +24,7 @@ import {
   setUser,
   userTrack,
 } from "@/redux/features/auth/authSlice";
+import { useSaveRecordingMutation } from "@/redux/features/recording/recordingAPI";
 
 interface VideoCallProps {
   channelName: string;
@@ -125,6 +126,9 @@ function CallUI({
   const [error, setError] = useState("");
 
   const { user, profileLoading } = useAuth();
+
+  // ─── Save recording to backend ────────────────────────────────
+  const [saveRecording] = useSaveRecordingMutation();
 
   // ─── Meeting Timer ──────────────────────────────────────────────
   const [meetingStartTime, setMeetingStartTime] = useState<number | null>(null);
@@ -696,20 +700,20 @@ function CallUI({
         console.log("📁 All recording files:", data.recordingUrls);
 
         // ──────────────────────────────────────────────────────────────
-        // ★ SAVE TO YOUR DATABASE HERE
-        // Uncomment and modify the code below to POST the URL to your backend:
-        //
-        // await fetch("https://your-backend.com/api/recordings", {
-        //   method: "POST",
-        //   headers: { "Content-Type": "application/json" },
-        //   body: JSON.stringify({
-        //     channelName,
-        //     recordingUrl: data.recordingUrl,
-        //     recordingUrls: data.recordingUrls,
-        //     duration: recordingElapsed,
-        //     recordedAt: new Date().toISOString(),
-        //   }),
-        // });
+        // ★ SAVE MP4 URL TO BACKEND
+        // ──────────────────────────────────────────────────────────────
+        try {
+          await saveRecording({
+            channelName,
+            recordingUrl: data.recordingUrl,
+            duration: recordingElapsed,
+            recordedAt: new Date().toISOString(),
+          }).unwrap();
+          console.log("✅ Recording URL saved to backend:", data.recordingUrl);
+        } catch (saveErr) {
+          console.error("⚠️ Failed to save recording URL to backend:", saveErr);
+          // Non-fatal: recording URL is still displayed in the UI
+        }
         // ──────────────────────────────────────────────────────────────
       }
 

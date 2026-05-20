@@ -56,7 +56,19 @@ function buildRecordingUrls(
   const prefix = `recordings/${channelName}`;
 
   // If Agora returned actual file names, use those
+  // NOTE: Agora fileList entries already include the fileNamePrefix path
+  // (e.g. "recordings/asa/sid_asa.m3u8"), so we must NOT prepend prefix again.
   if (fileListFromAgora && fileListFromAgora.length > 0) {
+    // Strip the prefix if Agora already included it in the filename
+    const normalizeFileName = (f: string) => {
+      // If the filename already starts with the prefix path, use it as-is (full S3 key)
+      if (f.startsWith(`${prefix}/`) || f.startsWith("recordings/")) {
+        return f;
+      }
+      // Otherwise, it's just a bare filename — prepend the prefix
+      return `${prefix}/${f}`;
+    };
+
     const mp4Files = fileListFromAgora.filter((f: string) =>
       f.endsWith(".mp4"),
     );
@@ -64,21 +76,22 @@ function buildRecordingUrls(
       f.endsWith(".m3u8"),
     );
     return {
-      mp4: mp4Files.map((f: string) => `${baseUrl}/${prefix}/${f}`),
-      m3u8: m3u8Files.map((f: string) => `${baseUrl}/${prefix}/${f}`),
+      mp4: mp4Files.map((f: string) => `${baseUrl}/${normalizeFileName(f)}`),
+      m3u8: m3u8Files.map((f: string) => `${baseUrl}/${normalizeFileName(f)}`),
       allFiles: fileListFromAgora.map(
-        (f: string) => `${baseUrl}/${prefix}/${f}`,
+        (f: string) => `${baseUrl}/${normalizeFileName(f)}`,
       ),
       // Primary URL — first MP4 file
       recordingUrl:
         mp4Files.length > 0
-          ? `${baseUrl}/${prefix}/${mp4Files[0]}`
-          : `${baseUrl}/${prefix}/${fileListFromAgora[0]}`,
+          ? `${baseUrl}/${normalizeFileName(mp4Files[0])}`
+          : `${baseUrl}/${normalizeFileName(fileListFromAgora[0])}`,
     };
   }
 
   // Construct predicted URLs from known naming pattern
-  const mp4FileName = `${sid}_${safeChannelName}.mp4`;
+  // Agora mix-mode MP4 files have a sequence suffix: <sid>_<channel>_0.mp4
+  const mp4FileName = `${sid}_${safeChannelName}_0.mp4`;
   const m3u8FileName = `${sid}_${safeChannelName}.m3u8`;
 
   return {

@@ -75,15 +75,24 @@ export async function GET(req: NextRequest) {
     let allFiles: string[];
 
     if (fileNames.length > 0) {
+      // Agora fileList entries may already include the fileNamePrefix path
+      // (e.g. "recordings/asa/sid_asa_0.mp4"), so normalize to avoid doubled paths
+      const normalizeFileName = (f: string) => {
+        if (f.startsWith(`${prefix}/`) || f.startsWith("recordings/")) {
+          return f;
+        }
+        return `${prefix}/${f}`;
+      };
+
       const mp4Files = fileNames.filter((f: string) => f.endsWith(".mp4"));
-      allFiles = fileNames.map((f: string) => `${baseUrl}/${prefix}/${f}`);
+      allFiles = fileNames.map((f: string) => `${baseUrl}/${normalizeFileName(f)}`);
       recordingUrl =
         mp4Files.length > 0
-          ? `${baseUrl}/${prefix}/${mp4Files[0]}`
+          ? `${baseUrl}/${normalizeFileName(mp4Files[0])}`
           : allFiles[0];
     } else {
-      // Predicted names
-      const mp4FileName = `${sid}_${safeChannelName}.mp4`;
+      // Predicted names — Agora mix-mode MP4 files have _0 sequence suffix
+      const mp4FileName = `${sid}_${safeChannelName}_0.mp4`;
       recordingUrl = `${baseUrl}/${prefix}/${mp4FileName}`;
       allFiles = [
         recordingUrl,
@@ -106,7 +115,7 @@ export async function GET(req: NextRequest) {
     // 404 = resource already released (normal after recording ends)
     if (err?.response?.status === 404) {
       // Recording is done, resource released — construct the URL from known pattern
-      const mp4FileName = `${sid}_${safeChannelName}.mp4`;
+      const mp4FileName = `${sid}_${safeChannelName}_0.mp4`;
       const recordingUrl = `${baseUrl}/${prefix}/${mp4FileName}`;
 
       return NextResponse.json({
