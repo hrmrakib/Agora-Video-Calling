@@ -1359,6 +1359,7 @@ function CallUI({
               const rn = remoteNames[String(user.uid)];
               const remoteName = rn?.name || `User ${user.uid}`;
               const remoteColor = rn?.color || "#6366f1";
+
               return (
                 <div
                   key={user.uid}

@@ -4,11 +4,10 @@ const recordingAPI = baseAPI.injectEndpoints({
   endpoints: (build) => ({
     saveRecording: build.mutation({
       query: (body) => ({
-        url: "/recordings/save/",
+        url: `/jobs/jobs/${body.jobId}/meetings/`,
         method: "POST",
         body,
       }),
-
     }),
   }),
 });
