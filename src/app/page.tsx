@@ -19,7 +19,8 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const { user } = useAuth();
+  const { user, profileLoading } = useAuth();
+
   console.log({ user });
 
   const baseURL = process.env.NEXT_PUBLIC_IMAGE_URL;
@@ -89,7 +90,7 @@ export default function Home() {
 
         <form onSubmit={handleSubmit} className='join-form'>
           {/* ─── Display Name ─── */}
-          {user ? (
+          {user && !profileLoading ? (
             <div>
               <h2 className='field-label text-xl! text-center! mb-2!'>
                 <span className='text-[#ffffff]!'>{user?.full_name}</span>
@@ -107,6 +108,12 @@ export default function Home() {
                   className='w-20 h-20 rounded-full'
                 />
               </div>
+            </div>
+          ) : profileLoading ? (
+            <div>
+              <h2 className='field-label text-xl! text-center! mb-2!'>
+                <span className='text-[#ffffff]!'>Loading...</span>
+              </h2>
             </div>
           ) : (
             <div>
