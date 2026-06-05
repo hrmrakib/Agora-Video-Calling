@@ -428,6 +428,7 @@ function CallUI({
 
   // Re-broadcast name when new remote user joins
   const remoteUserCountRef = useRef(0);
+
   useEffect(() => {
     if (!isConnected || remoteUsers.length <= remoteUserCountRef.current) {
       remoteUserCountRef.current = remoteUsers.length;
@@ -704,11 +705,14 @@ function CallUI({
         // ──────────────────────────────────────────────────────────────
         try {
           await saveRecording({
-            channelName,
-            recordingUrl: data.recordingUrl,
-            duration: recordingElapsed,
-            recordedAt: new Date().toISOString(),
+            jobId: channelName,
+            body: {
+              title: "Project Kickoff Meeting",
+              code: "MTG-001",
+              meeting_record: data.recordingUrl,
+            },
           }).unwrap();
+
           console.log("✅ Recording URL saved to backend:", data.recordingUrl);
         } catch (saveErr) {
           console.error("⚠️ Failed to save recording URL to backend:", saveErr);

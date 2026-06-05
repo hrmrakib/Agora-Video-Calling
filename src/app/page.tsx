@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { SubmitEvent, useState } from "react";
+import { SubmitEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import Image from "next/image";
@@ -21,7 +21,12 @@ export default function Home() {
   const [error, setError] = useState("");
   const { user, profileLoading } = useAuth();
 
-  console.log({ user });
+  useEffect(() => {
+    const jobId = localStorage.getItem("jobId");
+    if (jobId) {
+      setChannelName(jobId);
+    }
+  }, []);
 
   const baseURL = process.env.NEXT_PUBLIC_IMAGE_URL;
 
@@ -58,7 +63,9 @@ export default function Home() {
       }
     }
 
-    const trimmedChannel = channelName.trim();
+    // const trimmedChannel = channelName.trim();
+
+    const trimmedChannel = channelName.replace(/[\s]/g, "");
     if (!trimmedChannel) {
       setError("Please enter a channel name.");
       return;
@@ -165,7 +172,7 @@ export default function Home() {
           )}
 
           {/* ─── Channel Name ─── */}
-          <label
+          {/* <label
             htmlFor='channelName'
             className='field-label'
             style={{ marginTop: "12px" }}
@@ -186,7 +193,7 @@ export default function Home() {
               autoComplete='off'
               spellCheck={false}
             />
-          </div>
+          </div> */}
 
           {error && <p className='error-msg'>{error}</p>}
 

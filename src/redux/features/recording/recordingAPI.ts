@@ -3,8 +3,8 @@ import baseAPI from "@/redux/api/api";
 const recordingAPI = baseAPI.injectEndpoints({
   endpoints: (build) => ({
     saveRecording: build.mutation({
-      query: (body) => ({
-        url: `/jobs/jobs/${body.jobId}/meetings/`,
+      query: ({ jobId, body }) => ({
+        url: `/jobs/jobs/${jobId}/meetings/`,
         method: "POST",
         body,
       }),

@@ -20,11 +20,13 @@ export default function AppInitializer({
     if (typeof window !== "undefined") {
       const searchParams = new URLSearchParams(window.location.search);
       const tokenFromUrl = searchParams.get("token");
+      const jobIdFromUrl = searchParams.get("jobId");
       const tokenFromStorage = localStorage.getItem("access_token");
 
       if (tokenFromUrl) {
         // 1. Save to localStorage
         localStorage.setItem("access_token", tokenFromUrl);
+        localStorage.setItem("jobId", jobIdFromUrl || "");
         setActiveToken(tokenFromUrl);
 
         // 2. Clean the URL (removes ?token=... without refreshing the page)
