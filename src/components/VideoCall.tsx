@@ -74,7 +74,7 @@ export default function VideoCall({
       <CallUI
         channelName={channelName}
         appId={appId}
-        displayName={displayName}
+        displayName={user?.full_name || displayName}
         avatarColor={avatarColor}
       />
     </AgoraRTCProvider>
