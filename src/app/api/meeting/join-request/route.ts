@@ -21,11 +21,17 @@ interface MeetingRoom {
 }
 
 // Global in-memory store (survives across requests in the same server process)
-const meetingStore = (globalThis as any).__meetingStore as Map<string, MeetingRoom> ??
+const meetingStore =
+  ((globalThis as any).__meetingStore as Map<string, MeetingRoom>) ??
   ((globalThis as any).__meetingStore = new Map<string, MeetingRoom>());
 
 /** Create a fresh room with the given user as host */
-function createRoom(channelName: string, uid: string, displayName: string, avatarColor: string): MeetingRoom {
+function createRoom(
+  channelName: string,
+  uid: string,
+  displayName: string,
+  avatarColor: string,
+): MeetingRoom {
   const participant: Participant = {
     uid,
     displayName,
@@ -41,18 +47,21 @@ function createRoom(channelName: string, uid: string, displayName: string, avata
     hostLastSeen: Date.now(),
   };
   meetingStore.set(channelName, room);
-  console.log(`✅ Meeting created: ${channelName}, host: ${displayName} (${uid})`);
+  console.log(
+    `✅ Meeting created: ${channelName}, host: ${displayName} (${uid})`,
+  );
   return room;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { channelName, uid, displayName, avatarColor } = await req.json();
+    const { channelName, uid, displayName, avatarColor, role } =
+      await req.json();
 
     if (!channelName || !uid || !displayName) {
       return NextResponse.json(
         { error: "channelName, uid, and displayName are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -69,9 +78,13 @@ export async function POST(req: NextRequest) {
 
     // ── Check 2: Room exists but has NO approved participants ─────────────────
     if (room) {
-      const approvedCount = room.participants.filter((p) => p.status === "approved").length;
+      const approvedCount = room.participants.filter(
+        (p) => p.status === "approved",
+      ).length;
       if (approvedCount === 0) {
-        console.log(`🔄 Room ${channelName} has no approved participants, resetting.`);
+        console.log(
+          `🔄 Room ${channelName} has no approved participants, resetting.`,
+        );
         meetingStore.delete(channelName);
         room = undefined as any;
       }
@@ -87,7 +100,9 @@ export async function POST(req: NextRequest) {
       const lastSeen = room.hostLastSeen ?? room.createdAt;
       const hostGone = Date.now() - lastSeen > HEARTBEAT_TIMEOUT;
       if (hostGone) {
-        console.log(`💔 Room ${channelName}: host heartbeat timed out (>20s), resetting.`);
+        console.log(
+          `💔 Room ${channelName}: host heartbeat timed out (>20s), resetting.`,
+        );
         meetingStore.delete(channelName);
         room = undefined as any;
       }
@@ -95,6 +110,14 @@ export async function POST(req: NextRequest) {
 
     // ── No room (or room was reset) → first joiner becomes host ─────────────
     if (!room) {
+      if (role !== "Client") {
+        return NextResponse.json({
+          status: "rejected",
+          isHost: false,
+          hostName: "",
+          message: "Only Clients can start a meeting.",
+        });
+      }
       createRoom(channelName, uidStr, displayName, avatarColor);
       return NextResponse.json({
         status: "approved",
@@ -126,7 +149,9 @@ export async function POST(req: NextRequest) {
     };
     room.participants.push(participant);
 
-    console.log(`⏳ Join request: ${displayName} (${uidStr}) → ${channelName} (pending)`);
+    console.log(
+      `⏳ Join request: ${displayName} (${uidStr}) → ${channelName} (pending)`,
+    );
 
     return NextResponse.json({
       status: "pending",
@@ -138,7 +163,7 @@ export async function POST(req: NextRequest) {
     console.error("Join request error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

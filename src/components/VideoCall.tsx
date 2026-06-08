@@ -16,7 +16,6 @@ import AgoraRTC, {
 } from "agora-rtc-react";
 import { Disc2, DiscAlbum } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import Image from "next/image";
 import { useDispatch } from "react-redux";
 import { toast } from "sonner";
 import {
@@ -31,6 +30,7 @@ interface VideoCallProps {
   appId: string;
   displayName?: string;
   avatarColor?: string;
+  role?: string;
 }
 
 interface ScreenTrackState {
@@ -52,6 +52,9 @@ export default function VideoCall({
   if (!client) {
     client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   }
+
+  const { user } = useAuth();
+
   if (!appId) {
     return (
       <div className='error-screen'>
@@ -201,6 +204,7 @@ function CallUI({
             uid: sessionId,
             displayName,
             avatarColor,
+            role: user?.role,
           }),
         });
         const data = await res.json();
@@ -1456,7 +1460,7 @@ function CallUI({
           <span>{showSidebar ? "Hide" : "See"}</span>
         </button>
 
-        {isHost && (
+        {isHost && user?.role === "Client" && (
           <button
             onClick={recording ? stopRecording : startRecording}
             className={`ctrl-btn ${recording ? "ctrl-btn--off" : ""}`}

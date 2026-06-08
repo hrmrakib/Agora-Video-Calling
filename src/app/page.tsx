@@ -58,7 +58,7 @@ export default function Home() {
         // await saveTokens(data?.access_token);
         localStorage.setItem("access_token", data?.access_token);
 
-        setError("Please login to join a channel.");
+        // setError("Please login to join a channel.");
         return;
       }
     }
@@ -67,7 +67,7 @@ export default function Home() {
 
     const trimmedChannel = channelName.replace(/[\s]/g, "");
     if (!trimmedChannel) {
-      setError("Please enter a channel name.");
+      setError("You are in a wrong meeting. Please go to right link.");
       return;
     }
 
