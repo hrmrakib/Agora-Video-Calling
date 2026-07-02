@@ -8,6 +8,7 @@ interface Participant {
   uid: string;
   displayName: string;
   avatarColor: string;
+  avatarUrl?: string;
   status: "approved" | "pending" | "rejected";
   joinedAt: number;
 }
@@ -31,11 +32,13 @@ function createRoom(
   uid: string,
   displayName: string,
   avatarColor: string,
+  avatarUrl?: string,
 ): MeetingRoom {
   const participant: Participant = {
     uid,
     displayName,
     avatarColor: avatarColor || "#6366f1",
+    avatarUrl,
     status: "approved",
     joinedAt: Date.now(),
   };
@@ -55,7 +58,7 @@ function createRoom(
 
 export async function POST(req: NextRequest) {
   try {
-    const { channelName, uid, displayName, avatarColor, role } =
+    const { channelName, uid, displayName, avatarColor, avatarUrl, role } =
       await req.json();
 
     if (!channelName || !uid || !displayName) {
@@ -118,7 +121,7 @@ export async function POST(req: NextRequest) {
           message: "Only Clients can start a meeting.",
         });
       }
-      createRoom(channelName, uidStr, displayName, avatarColor);
+      createRoom(channelName, uidStr, displayName, avatarColor, avatarUrl);
       return NextResponse.json({
         status: "approved",
         isHost: true,
@@ -144,6 +147,7 @@ export async function POST(req: NextRequest) {
       uid: uidStr,
       displayName,
       avatarColor: avatarColor || "#6366f1",
+      avatarUrl: avatarUrl || undefined,
       status: "pending",
       joinedAt: Date.now(),
     };

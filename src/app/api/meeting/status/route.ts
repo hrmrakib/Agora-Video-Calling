@@ -5,6 +5,7 @@ interface Participant {
   uid: string;
   displayName: string;
   avatarColor: string;
+  avatarUrl?: string;
   status: "approved" | "pending" | "rejected";
   joinedAt: number;
 }
@@ -18,7 +19,8 @@ interface MeetingRoom {
 }
 
 // Access the same global store
-const meetingStore = (globalThis as any).__meetingStore as Map<string, MeetingRoom> ??
+const meetingStore =
+  ((globalThis as any).__meetingStore as Map<string, MeetingRoom>) ??
   ((globalThis as any).__meetingStore = new Map<string, MeetingRoom>());
 
 export async function GET(req: NextRequest) {
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest) {
     if (!channelName || !uid) {
       return NextResponse.json(
         { error: "channelName and uid are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -70,6 +72,7 @@ export async function GET(req: NextRequest) {
           uid: p.uid,
           displayName: p.displayName,
           avatarColor: p.avatarColor,
+          avatarUrl: p.avatarUrl,
           joinedAt: p.joinedAt,
         }));
 
@@ -79,6 +82,7 @@ export async function GET(req: NextRequest) {
           uid: p.uid,
           displayName: p.displayName,
           avatarColor: p.avatarColor,
+          avatarUrl: p.avatarUrl,
         }));
     }
 
@@ -87,7 +91,7 @@ export async function GET(req: NextRequest) {
     console.error("Status check error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -24,12 +24,14 @@ import {
   userTrack,
 } from "@/redux/features/auth/authSlice";
 import { useSaveRecordingMutation } from "@/redux/features/recording/recordingAPI";
+import { getImageURL } from "@/utils/getImageURL";
 
 interface VideoCallProps {
   channelName: string;
   appId: string;
   displayName?: string;
   avatarColor?: string;
+  avatarUrl?: string;
   role?: string;
 }
 
@@ -46,6 +48,7 @@ export default function VideoCall({
   channelName,
   appId,
   displayName = "Guest",
+  avatarUrl,
   avatarColor = "#6366f1",
 }: VideoCallProps) {
   // Initialize client on first render (client-side only)
@@ -76,6 +79,7 @@ export default function VideoCall({
         appId={appId}
         displayName={user?.full_name || displayName}
         avatarColor={avatarColor}
+        avatarUrl={avatarUrl}
       />
     </AgoraRTCProvider>
   );
@@ -86,6 +90,7 @@ function CallUI({
   appId,
   displayName = "Guest",
   avatarColor = "#6366f1",
+  avatarUrl,
 }: VideoCallProps) {
   const router = useRouter();
   const [micMuted, setMicMuted] = useState(false);
@@ -130,6 +135,8 @@ function CallUI({
 
   const { user, profileLoading } = useAuth();
 
+  console.log({ user });
+
   // ─── Save recording to backend ────────────────────────────────
   const [saveRecording] = useSaveRecordingMutation();
 
@@ -150,6 +157,8 @@ function CallUI({
   const [isHost, setIsHost] = useState(false);
   const [hostName, setHostName] = useState("");
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+
+  console.log({ pendingRequests });
 
   // ─── Remote user display names ────────────────────────────────
   const [remoteNames, setRemoteNames] = useState<
@@ -194,6 +203,9 @@ function CallUI({
   // same identity, even though the Agora uid changes on every page load.
   useEffect(() => {
     if (!sessionId) return;
+
+    if (profileLoading) return;
+
     async function requestJoin() {
       try {
         const res = await fetch("/api/meeting/join-request", {
@@ -204,6 +216,7 @@ function CallUI({
             uid: sessionId,
             displayName,
             avatarColor,
+            avatarUrl: user?.profile_pic,
             role: user?.role,
           }),
         });
@@ -231,7 +244,15 @@ function CallUI({
       }
     }
     requestJoin();
-  }, [sessionId, channelName, displayName, avatarColor]);
+  }, [
+    sessionId,
+    channelName,
+    displayName,
+    avatarColor,
+    user?.profile_pic,
+    profileLoading,
+    user?.role,
+  ]);
 
   // Step 2: Poll for approval status (non-hosts only) — uses sessionId
   useEffect(() => {
@@ -264,6 +285,9 @@ function CallUI({
           `/api/meeting/status?channelName=${encodeURIComponent(channelName)}&uid=${sessionId}&heartbeat=true`,
         );
         const data = await res.json();
+
+        console.log("pending req", data);
+
         if (data.pendingRequests) setPendingRequests(data.pendingRequests);
       } catch {}
     }, 2000);
@@ -768,8 +792,6 @@ function CallUI({
   // ─── Lobby Screen (waiting for host approval) ─────────────────
   // Note: if the server confirmed this user is the host, skip the lobby entirely
 
-  const baseURL = process.env.NEXT_PUBLIC_IMAGE_URL;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -829,8 +851,6 @@ function CallUI({
       setIsLoginLoading(false);
     }
   };
-
-  console.log({ user });
 
   if (!user && !profileLoading) {
     return (
@@ -1238,9 +1258,18 @@ function CallUI({
             <div key={req.uid} className='pending-toast'>
               <div
                 className='pending-toast-avatar'
-                style={{ background: req.avatarColor || "#6366f1" }}
+                // style={{ background: req.avatarColor || "#6366f1" }}
               >
-                {getInitials(req.displayName)}
+                {req?.avatarUrl ? (
+                  <img
+                    src={getImageURL(req?.avatarUrl)}
+                    width={40}
+                    height={40}
+                    alt={getInitials(req.displayName) || ""}
+                  />
+                ) : (
+                  getInitials(req.displayName)
+                )}
               </div>
               <div className='pending-toast-info'>
                 <span className='pending-toast-name'>{req.displayName}</span>
@@ -1387,6 +1416,7 @@ function CallUI({
         )}
       </div>
 
+      {/* user side list */}
       {showSidebar && (
         <div className='sidebar'>
           <h3>Participants</h3>
