@@ -1266,6 +1266,7 @@ function CallUI({
                     width={40}
                     height={40}
                     alt={getInitials(req.displayName) || ""}
+                    className='rounded-md'
                   />
                 ) : (
                   getInitials(req.displayName)
